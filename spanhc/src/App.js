@@ -591,8 +591,7 @@ const CLAIMS = [
   { id: "CLM-001", service: "General Consultation", doctor: "Dr. Amira Osei", date: "Feb 20", amount: "N5,000", status: "approved" },
   { id: "CLM-002", service: "Full Blood Count", doctor: "Lab Services", 
 date: "Feb 18", amount: "N12,000", status: "pending" },
-  { id: "CLM-003", service: "Medications", doctor: "Pharmacy", date: "Feb 
-18", amount: "N3,200", status: "approved" },
+  { id: "CLM-003", service: "Medications", doctor: "Pharmacy", date: "Feb 18", amount: "N3,200", status: "approved" },
   { id: "CLM-004", service: "Cardiology Consult", doctor: "Dr. Bello", 
 date: "Jan 30", amount: "N8,500", status: "rejected" },
 ];
