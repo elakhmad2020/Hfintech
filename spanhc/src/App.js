@@ -650,7 +650,12 @@ Savings,</span><br />One Platform.</div>
 Save for healthcare, consult doctors instantly, manage your family health 
 records, and claim insurance seamlessly.</div>
         <div className="auth-features">
+<<<<<<< HEAD
           {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat", "Family profile and dependent management", 
+=======
+          {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat",
+ "Family profile and dependent management", 
+>>>>>>> 4429e9051b5b91c18050076c6479db5110d3a0aa
 "Insurance claims and document vault", "Wellness tracking and health scoring"].map(f => (
             <div key={f} className="auth-feature"><div 
 className="auth-feature-dot" />{f}</div>
@@ -684,31 +689,44 @@ code</span></p>
             <>
               <div className="auth-form-title">{mode === "login" ? 
 "Welcome back" : "Create account"}</div>
+<<<<<<< HEAD
               <div className="auth-form-sub">{mode === "login" ? "Log into your HealthSave dashboard" : step === 1 ? "Step 1 of 2 - Personal details" : "Step 2 of 2 - Set your password"}</div>
               <div className="auth-tabs">
                 <button className={"auth-tab" + (mode === "login" ? "active" : "")} onClick={() => { setMode("login"); setStep(1); }}>Log 
+=======
+              <div className="auth-form-sub">{mode === "login" ? "Log in to your HealthSave dashboard" :
+ step === 1 ? "Step 1 of 2 - Personal details" : "Step 2 of 2 - Set your password"}</div>
+              <div className="auth-tabs">
+                <button className={"auth-tab" + (mode === "login" ? "active" : "")} onClick={() => { setMode("login");
+ setStep(1); }}>Log 
+>>>>>>> 4429e9051b5b91c18050076c6479db5110d3a0aa
 In</button>
                 <button className={"auth-tab" + (mode === "register" ? "active" : "")} onClick={() => { setMode("register"); setStep(1); 
 }}>Register</button>
               </div>
-              {mode === "register" && step === 1 && <>
+i              {mode === "register" && step === 1 && <>
                 <div className="form-group"><label 
 className="form-label">Full Name</label><input className="form-input" 
 placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({ 
 ...form, name: e.target.value })} /></div>
                 <div className="form-group"><label 
 className="form-label">Email Address</label><input className="form-input" 
+<<<<<<< HEAD
 type="email" placeholder="you@email.com" value={form.email} onChange={e => 
 setForm({ ...form, email: e.target.value })} /></div>
                 <div className="form-group"><label 
 className="form-label">Phone Number</label><input className="form-input" 
 type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+=======
+type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel"
+ placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+>>>>>>> 4429e9051b5b91c18050076c6479db5110d3a0aa
               </>}
               {((mode === "register" && step === 2) || mode === "login") 
 && <>
                 {mode === "login" && <div className="form-group"><label 
-className="form-label">Email or Phone</label><input className="form-input" 
-placeholder="you@email.com or +234..." /></div>}
+className="form-label">Email or Phone</label><input className="form-input" placeholder="you@email.com or +234..." /></div>}
                 <div className="form-group"><label 
 className="form-label">Password</label><input className="form-input" 
 type="password" placeholder="Enter password" /></div>
