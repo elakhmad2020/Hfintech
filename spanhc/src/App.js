@@ -686,8 +686,7 @@ code</span></p>
               <div className="auth-form-title">{mode === "login" ? 
 "Welcome back" : "Create account"}</div>
               <div className="auth-form-sub">{mode === "login" ? "Log in to your HealthSave dashboard" :
- step === 1 ? "Step 1 of 2 - Personal 
-details" : "Step 2 of 2 - Set your password"}</div>
+ step === 1 ? "Step 1 of 2 - Personal details" : "Step 2 of 2 - Set your password"}</div>
               <div className="auth-tabs">
                 <button className={"auth-tab" + (mode === "login" ? "active" : "")} onClick={() => { setMode("login");
  setStep(1); }}>Log 
@@ -695,7 +694,7 @@ In</button>
                 <button className={"auth-tab" + (mode === "register" ? "active" : "")} onClick={() => { setMode("register"); setStep(1); 
 }}>Register</button>
               </div>
-              {mode === "register" && step === 1 && <>
+i              {mode === "register" && step === 1 && <>
                 <div className="form-group"><label 
 className="form-label">Full Name</label><input className="form-input" 
 placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({ 
@@ -804,8 +803,7 @@ onNav("telemedicine")}>+ Book Appointment</button>
 
       <div className="stats-grid">
         {[
-          { label: "Wallet Balance", value: "N237,500", change: "Up N50k 
-this month", up: true, tag: "WALLET", tagBg: "#ccfbf1", tagColor: 
+          { label: "Wallet Balance", value: "N237,500", change: "Up N50k this month", up: true, tag: "WALLET", tagBg: "#ccfbf1", tagColor: 
 "#0f766e" },
           { label: "Total Spent on Health", value: "N28,700", change: 
 "Down N3k vs last month", up: false, tag: "SPENT", tagBg: "#fee2e2", 
