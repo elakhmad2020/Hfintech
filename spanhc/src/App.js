@@ -609,20 +609,13 @@ online: true },
 ];
 
 const CHAT_MESSAGES = [
-  { id: 1, text: "Hello Dr. Amira! I have been feeling some chest 
-tightness lately.", sent: true, time: "10:20 AM" },
-  { id: 2, text: "Hi! I understand your concern. How long have you been 
-experiencing this? Any other symptoms like shortness of breath or 
-palpitations?", sent: false, time: "10:22 AM" },
-  { id: 3, text: "About 3 days now. Sometimes I feel short of breath too 
-especially when climbing stairs.", sent: true, time: "10:24 AM" },
-  { id: 4, text: "I see. Can you upload your latest blood pressure 
-readings? I would also recommend we do a quick video call so I can assess 
-you better.", sent: false, time: "10:26 AM" },
+  { id: 1, text: "Hello Dr. Amira! I have been feeling some chest tightness lately.", sent: true, time: "10:20 AM" },
+  { id: 2, text: "Hi! I understand your concern. How long have you been experiencing this? Any other symptoms like shortness of breath or palpitations?", sent: false, time: "10:22 AM" },
+  { id: 3, text: "About 3 days now. Sometimes I feel short of breath too especially when climbing stairs.", sent: true, time: "10:24 AM" },
+  { id: 4, text: "I see. Can you upload your latest blood pressure readings? I would also recommend we do a quick video call so I can assess you better.", sent: false, time: "10:26 AM" },
   { id: 5, text: "Sure, let me get that. Should I be worried?", sent: 
 true, time: "10:28 AM" },
-  { id: 6, text: "Do not worry, we will get to the bottom of this. Your 
-results from last week look great. Let us schedule a call.", sent: false, 
+  { id: 6, text: "Do not worry, we will get to the bottom of this. Your results from last week look great. Let us schedule a call.", sent: false, 
 time: "10:32 AM" },
 ];
 
@@ -657,10 +650,9 @@ Savings,</span><br />One Platform.</div>
 Save for healthcare, consult doctors instantly, manage your family health 
 records, and claim insurance seamlessly.</div>
         <div className="auth-features">
-          {["Health Savings Wallet with smart budgeting", "Telemedicine 
-via video, audio and chat", "Family profile and dependent management", 
-"Insurance claims and document vault", "Wellness tracking and health 
-scoring"].map(f => (
+          {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat",
+ "Family profile and dependent management", 
+"Insurance claims and document vault", "Wellness tracking and health scoring"].map(f => (
             <div key={f} className="auth-feature"><div 
 className="auth-feature-dot" />{f}</div>
           ))}
@@ -693,15 +685,14 @@ code</span></p>
             <>
               <div className="auth-form-title">{mode === "login" ? 
 "Welcome back" : "Create account"}</div>
-              <div className="auth-form-sub">{mode === "login" ? "Log in 
-to your HealthSave dashboard" : step === 1 ? "Step 1 of 2 - Personal 
+              <div className="auth-form-sub">{mode === "login" ? "Log in to your HealthSave dashboard" :
+ step === 1 ? "Step 1 of 2 - Personal 
 details" : "Step 2 of 2 - Set your password"}</div>
               <div className="auth-tabs">
-                <button className={"auth-tab" + (mode === "login" ? " 
-active" : "")} onClick={() => { setMode("login"); setStep(1); }}>Log 
+                <button className={"auth-tab" + (mode === "login" ? "active" : "")} onClick={() => { setMode("login");
+ setStep(1); }}>Log 
 In</button>
-                <button className={"auth-tab" + (mode === "register" ? " 
-active" : "")} onClick={() => { setMode("register"); setStep(1); 
+                <button className={"auth-tab" + (mode === "register" ? "active" : "")} onClick={() => { setMode("register"); setStep(1); 
 }}>Register</button>
               </div>
               {mode === "register" && step === 1 && <>
@@ -713,16 +704,14 @@ placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({
 className="form-label">Email Address</label><input className="form-input" 
 type="email" placeholder="you@email.com" value={form.email} onChange={e => 
 setForm({ ...form, email: e.target.value })} /></div>
-                <div className="form-group"><label 
-className="form-label">Phone Number</label><input className="form-input" 
-type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e 
+                <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel"
+ placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e 
 => setForm({ ...form, phone: e.target.value })} /></div>
               </>}
               {((mode === "register" && step === 2) || mode === "login") 
 && <>
                 {mode === "login" && <div className="form-group"><label 
-className="form-label">Email or Phone</label><input className="form-input" 
-placeholder="you@email.com or +234..." /></div>}
+className="form-label">Email or Phone</label><input className="form-input" placeholder="you@email.com or +234..." /></div>}
                 <div className="form-group"><label 
 className="form-label">Password</label><input className="form-input" 
 type="password" placeholder="Enter password" /></div>
