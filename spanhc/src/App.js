@@ -588,12 +588,10 @@ doctor: "Dr. Ibrahim Musa", type: "In-Person" },
 ];
 
 const CLAIMS = [
-  { id: "CLM-001", service: "General Consultation", doctor: "Dr. Amira 
-Osei", date: "Feb 20", amount: "N5,000", status: "approved" },
+  { id: "CLM-001", service: "General Consultation", doctor: "Dr. Amira Osei", date: "Feb 20", amount: "N5,000", status: "approved" },
   { id: "CLM-002", service: "Full Blood Count", doctor: "Lab Services", 
 date: "Feb 18", amount: "N12,000", status: "pending" },
-  { id: "CLM-003", service: "Medications", doctor: "Pharmacy", date: "Feb 
-18", amount: "N3,200", status: "approved" },
+  { id: "CLM-003", service: "Medications", doctor: "Pharmacy", date: "Feb 18", amount: "N3,200", status: "approved" },
   { id: "CLM-004", service: "Cardiology Consult", doctor: "Dr. Bello", 
 date: "Jan 30", amount: "N8,500", status: "rejected" },
 ];
@@ -611,20 +609,13 @@ online: true },
 ];
 
 const CHAT_MESSAGES = [
-  { id: 1, text: "Hello Dr. Amira! I have been feeling some chest 
-tightness lately.", sent: true, time: "10:20 AM" },
-  { id: 2, text: "Hi! I understand your concern. How long have you been 
-experiencing this? Any other symptoms like shortness of breath or 
-palpitations?", sent: false, time: "10:22 AM" },
-  { id: 3, text: "About 3 days now. Sometimes I feel short of breath too 
-especially when climbing stairs.", sent: true, time: "10:24 AM" },
-  { id: 4, text: "I see. Can you upload your latest blood pressure 
-readings? I would also recommend we do a quick video call so I can assess 
-you better.", sent: false, time: "10:26 AM" },
+  { id: 1, text: "Hello Dr. Amira! I have been feeling some chest tightness lately.", sent: true, time: "10:20 AM" },
+  { id: 2, text: "Hi! I understand your concern. How long have you been experiencing this? Any other symptoms like shortness of breath or palpitations?", sent: false, time: "10:22 AM" },
+  { id: 3, text: "About 3 days now. Sometimes I feel short of breath too especially when climbing stairs.", sent: true, time: "10:24 AM" },
+  { id: 4, text: "I see. Can you upload your latest blood pressure readings? I would also recommend we do a quick video call so I can assess you better.", sent: false, time: "10:26 AM" },
   { id: 5, text: "Sure, let me get that. Should I be worried?", sent: 
 true, time: "10:28 AM" },
-  { id: 6, text: "Do not worry, we will get to the bottom of this. Your 
-results from last week look great. Let us schedule a call.", sent: false, 
+  { id: 6, text: "Do not worry, we will get to the bottom of this. Your results from last week look great. Let us schedule a call.", sent: false, 
 time: "10:32 AM" },
 ];
 
@@ -659,10 +650,8 @@ Savings,</span><br />One Platform.</div>
 Save for healthcare, consult doctors instantly, manage your family health 
 records, and claim insurance seamlessly.</div>
         <div className="auth-features">
-          {["Health Savings Wallet with smart budgeting", "Telemedicine 
-via video, audio and chat", "Family profile and dependent management", 
-"Insurance claims and document vault", "Wellness tracking and health 
-scoring"].map(f => (
+          {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat", "Family profile and dependent management", 
+"Insurance claims and document vault", "Wellness tracking and health scoring"].map(f => (
             <div key={f} className="auth-feature"><div 
 className="auth-feature-dot" />{f}</div>
           ))}
@@ -695,15 +684,11 @@ code</span></p>
             <>
               <div className="auth-form-title">{mode === "login" ? 
 "Welcome back" : "Create account"}</div>
-              <div className="auth-form-sub">{mode === "login" ? "Log in 
-to your HealthSave dashboard" : step === 1 ? "Step 1 of 2 - Personal 
-details" : "Step 2 of 2 - Set your password"}</div>
+              <div className="auth-form-sub">{mode === "login" ? "Log into your HealthSave dashboard" : step === 1 ? "Step 1 of 2 - Personal details" : "Step 2 of 2 - Set your password"}</div>
               <div className="auth-tabs">
-                <button className={"auth-tab" + (mode === "login" ? " 
-active" : "")} onClick={() => { setMode("login"); setStep(1); }}>Log 
+                <button className={"auth-tab" + (mode === "login" ? "active" : "")} onClick={() => { setMode("login"); setStep(1); }}>Log 
 In</button>
-                <button className={"auth-tab" + (mode === "register" ? " 
-active" : "")} onClick={() => { setMode("register"); setStep(1); 
+                <button className={"auth-tab" + (mode === "register" ? "active" : "")} onClick={() => { setMode("register"); setStep(1); 
 }}>Register</button>
               </div>
               {mode === "register" && step === 1 && <>
@@ -717,8 +702,7 @@ type="email" placeholder="you@email.com" value={form.email} onChange={e =>
 setForm({ ...form, email: e.target.value })} /></div>
                 <div className="form-group"><label 
 className="form-label">Phone Number</label><input className="form-input" 
-type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e 
-=> setForm({ ...form, phone: e.target.value })} /></div>
+type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
               </>}
               {((mode === "register" && step === 2) || mode === "login") 
 && <>
@@ -817,16 +801,15 @@ onNav("telemedicine")}>+ Book Appointment</button>
 
       <div className="stats-grid">
         {[
-          { label: "Wallet Balance", value: "N237,500", change: "Up N50k 
-this month", up: true, tag: "WALLET", tagBg: "#ccfbf1", tagColor: 
+          { label: "Wallet Balance", value: "N237,500", change: "Up N50k this month", up: true, tag: "WALLET", tagBg: "#ccfbf1", tagColor: 
 "#0f766e" },
           { label: "Total Spent on Health", value: "N28,700", change: 
 "Down N3k vs last month", up: false, tag: "SPENT", tagBg: "#fee2e2", 
 tagColor: "#991b1b" },
           { label: "Dependents Covered", value: "3", change: "All active", 
 up: true, tag: "FAMILY", tagBg: "#eff6ff", tagColor: "#1d4ed8" },
-          { label: "Upcoming Appointments", value: "2", change: "Next: Feb 
-24", up: true, tag: "APPT", tagBg: "#fef9c3", tagColor: "#854d0e" },
+          { label: "Upcoming Appointments", value: "2", change: "Next: Feb 24", 
+            up: true, tag: "APPT", tagBg: "#fef9c3", tagColor: "#854d0e" },
         ].map(s => (
           <div key={s.label} className="stat-card">
             <Tag text={s.tag} bg={s.tagBg} color={s.tagColor} />
@@ -1020,8 +1003,7 @@ className="form-label">Amount (N)</label><input className="form-input"
 placeholder="e.g. 50000" type="number" /></div>
               <div className="form-group">
                 <label className="form-label">Payment Method</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 
-1fr 1fr", gap: 10, marginTop: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 8 }}>
                   {["Card", "Bank Transfer", "USSD"].map(m => <div key={m} 
 style={{ border: "2px solid #e2e8f0", borderRadius: 12, padding: 14, 
 textAlign: "center", cursor: "pointer", fontSize: 14, fontWeight: 600, 
@@ -1045,8 +1027,7 @@ function TelemedicinePage() {
   const [scheduleStep, setScheduleStep] = useState(1);
   const filtered = filter === "all" ? DOCTORS : DOCTORS.filter(d => 
 d.status === filter);
-  const timeSlots = ["8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 
-AM", "10:30 AM", "11:00 AM", "11:30 AM", "2:00 PM", "2:30 PM", "3:00 PM", 
+  const timeSlots = ["8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM", "2:00 PM", "2:30 PM", "3:00 PM", 
 "3:30 PM"];
   return (
     <div>
@@ -1275,9 +1256,7 @@ fontWeight: 800, fontFamily: "'Syne',sans-serif", color: "var(--success)"
           <div className="card-title" style={{ marginBottom: 20 
 }}>Personal Information</div>
           <div className="form-grid-2">
-            {[{ label: "First Name", value: "Emeka" }, { label: "Last 
-Name", value: "Okafor" }, { label: "Phone Number", value: "+234 803 456 
-7890" }, { label: "Email", value: "emeka.okafor@email.com" }].map(f => (
+            {[{ label: "First Name", value: "Emeka" }, { label: "Last Name", value: "Okafor" }, { label: "Phone Number", value: "+234 803 456 7890" }, { label: "Email", value: "emeka.okafor@email.com" }].map(f => (
               <div key={f.label} className="form-group"><label 
 className="form-label">{f.label}</label><input className="form-input" 
 defaultValue={f.value} disabled={!editing} /></div>
@@ -1327,8 +1306,7 @@ Contact</div>
         <div style={{ display: "grid", gridTemplateColumns: 
 "repeat(3,1fr)", gap: 16 }}>
           {[{ label: "Full Name", value: "Mrs. Grace Okafor" }, { label: 
-"Relationship", value: "Spouse" }, { label: "Phone Number", value: "+234 
-805 123 4567" }].map(f => (
+"Relationship", value: "Spouse" }, { label: "Phone Number", value: "+234 805 123 4567" }].map(f => (
             <div key={f.label} className="form-group"><label 
 className="form-label">{f.label}</label><input className="form-input" 
 defaultValue={f.value} disabled={!editing} /></div>
@@ -1488,8 +1466,7 @@ your doctors and support team</div></div></div>
           <div className="chat-sidebar-header"><input 
 className="chat-search" placeholder="Search conversations..." /></div>
           {CHAT_CONTACTS.map((c, i) => (
-            <div key={c.id} className={"chat-contact" + (active === i ? " 
-active" : "")} onClick={() => setActive(i)}>
+            <div key={c.id} className={"chat-contact" + (active === i ? "active" : "")} onClick={() => setActive(i)}>
               <div style={{ position: "relative" }}>
                 <div className="chat-contact-avatar">{c.initials}</div>
                 {c.online && <div style={{ position: "absolute", bottom: 
@@ -1652,8 +1629,7 @@ Score</div><div className="card-sub">Updated weekly</div></div>
           </div>
           <div className="health-score-bar"><div 
 className="health-score-fill" style={{ width: "82%" }} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 
-1fr", gap: 12, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 16 }}>
             {[{ label: "BMI", value: "25.5" }, { label: "BP", value: 
 "120/80" }, { label: "Sugar", value: "98 mg" }].map(m => (
               <div key={m.label} style={{ textAlign: "center", background: 
@@ -1850,14 +1826,12 @@ className="page-title">Settings</div><div className="page-sub">Manage your
 account preferences</div></div></div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 
 24 }}>
-        {[{ title: "Notifications", tag: "BELL", items: ["Email alerts for 
-appointments", "SMS reminders", "Push notifications", "Newsletter and 
-health tips"] }, { title: "Security", tag: "LOCK", items: ["Two-factor 
-authentication", "Biometric login", "Login activity alerts", "Change 
-password"] }, { title: "Privacy", tag: "PRIV", items: ["Data sharing 
-preferences", "Health data visibility", "Delete account data", "Download 
-my data"] }, { title: "Payment", tag: "PAY", items: ["Saved payment 
-methods", "Auto-fund wallet", "Spending limits", "Payment notifications"] 
+        {[{ title: "Notifications", tag: "BELL", items: ["Email alerts for appointments", "SMS reminders", 
+        "Push notifications", "Newsletter and health tips"] }, { title: "Security", tag: "LOCK", items: 
+          ["Two-factor authentication", "Biometric login", "Login activity alerts", "Change password"] }, 
+          { title: "Privacy", tag: "PRIV", items: ["Data sharing preferences", "Health data visibility", 
+            "Delete account data", "Download my data"] }, { title: "Payment", tag: "PAY", 
+              items: ["Saved payment methods", "Auto-fund wallet", "Spending limits", "Payment notifications"] 
 }].map(sec => (
           <div key={sec.title} className="card">
             <div style={{ display: "flex", gap: 10, alignItems: "center", 
