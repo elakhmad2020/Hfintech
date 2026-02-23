@@ -701,11 +701,9 @@ placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({
 ...form, name: e.target.value })} /></div>
                 <div className="form-group"><label 
 className="form-label">Email Address</label><input className="form-input" 
-type="email" placeholder="you@email.com" value={form.email} onChange={e => 
-setForm({ ...form, email: e.target.value })} /></div>
+type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
                 <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel"
- placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e 
-=> setForm({ ...form, phone: e.target.value })} /></div>
+ placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
               </>}
               {((mode === "register" && step === 2) || mode === "login") 
 && <>
