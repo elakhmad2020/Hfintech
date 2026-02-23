@@ -651,8 +651,6 @@ Save for healthcare, consult doctors instantly, manage your family health
 records, and claim insurance seamlessly.</div>
         <div className="auth-features">
           {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat", "Family profile and dependent management", 
-          {["Health Savings Wallet with smart budgeting", "Telemedicine via video, audio and chat",
- "Family profile and dependent management", 
 "Insurance claims and document vault", "Wellness tracking and health scoring"].map(f => (
             <div key={f} className="auth-feature"><div 
 className="auth-feature-dot" />{f}</div>
@@ -713,11 +711,11 @@ setForm({ ...form, email: e.target.value })} /></div>
                 <div className="form-group"><label 
 className="form-label">Phone Number</label><input className="form-input" 
 type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
-type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /{">"}/div{">"}
                 <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel"
  placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
 
-              </>}
+              </>} {"}"}
               {((mode === "register" && step === 2) || mode === "login") 
 && <>
                 {mode === "login" && <div className="form-group"><label 
@@ -746,28 +744,28 @@ justifyContent: "center" }}>Google</button>
 justifyContent: "center" }}>Facebook</button>
                 </div>
               </>}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+            
+          ){"}"}
+        /div>"{"}"}
+      /div>
+    /div>
   );
-}
+{"}"}
 
 function Sidebar({ active, onNav }) {
-  const sections = [
+const sections = [
     { label: "", items: [{ id: "dashboard", label: "Dashboard", short: 
-"DB" }, { id: "wallet", label: "Wallet and Savings", short: "WL" }, { id: 
-"transactions", label: "Transactions", short: "TX" }] },
+"DB" {"}"}, { id: "wallet", label: "Wallet and Savings", short: "WL" {"}"}, { id: 
+"transactions", label: "Transactions", short: "TX" {"}"}] {"}"},
     { label: "Health", items: [{ id: "telemedicine", label: 
-"Telemedicine", short: "TM", badge: "3" }, { id: "appointments", label: 
-"Appointments", short: "AP" }, { id: "chat", label: "Messages", short: 
-"MSG", badge: "3" }, { id: "documents", label: "Documents", short: "DOC" 
-}, { id: "wellness", label: "Wellness", short: "WN" }] },
+"Telemedicine", short: "TM", badge: "3" {"}"}, { id: "appointments", label: 
+"Appointments", short: "AP" {"}"}, { id: "chat", label: "Messages", short: 
+"MSG", badge: "3" {"}"}, { id: "documents", label: "Documents", short: "DOC" 
+{"}"}, { id: "wellness", label: "Wellness", short: "WN" {"}"}] {"}"},
     { label: "Account", items: [{ id: "profile", label: "My Profile", 
-short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { 
-id: "insurance", label: "Insurance and Claims", short: "IN" }, { id: 
-"settings", label: "Settings", short: "ST" }] },
+short: "PR" {"}"}, { id: "dependents", label: "Dependents", short: "DP" {"}"}, { 
+id: "insurance", label: "Insurance and Claims", short: "IN" {"}"}, { id: 
+"settings", label: "Settings", short: "ST" {"}"}] {"}"},
   ];
   return (
     <div className="sidebar">
@@ -800,7 +798,7 @@ className="sidebar-user-role">Principal Member</div></div>
       </div>
     </div>
   );
-}
+{"}"}
 
 function Dashboard({ onNav }) {
   return (
@@ -938,7 +936,7 @@ className="appt-doctor">{a.doctor}</div></div>
       </div>
     </div>
   );
-}
+{"}"}
 
 function WalletPage() {
   const [showFund, setShowFund] = useState(false);
@@ -1031,14 +1029,14 @@ color: "var(--navy)" }}>{m}</div>)}
       )}
     </div>
   );
-}
+{"}"}
 
 function TelemedicinePage() {
   const [filter, setFilter] = useState("all");
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [scheduleStep, setScheduleStep] = useState(1);
-  const filtered = filter === "all" ? DOCTORS : DOCTORS.filter(d => 
+  const filtered = filter === "all" ? DOCTORS : DOCTORS.filter(d ={">"} 
 d.status === filter);
   const timeSlots = ["8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM", "2:00 PM", "2:30 PM", "3:00 PM", 
 "3:30 PM"];
@@ -1227,7 +1225,7 @@ onClick={() => setScheduleStep(1)}>Back</button>
       )}
     </div>
   );
-}
+{"}"}
 
 function ProfilePage() {
   const [editing, setEditing] = useState(false);
@@ -1328,7 +1326,7 @@ defaultValue={f.value} disabled={!editing} /></div>
       </div>
     </div>
   );
-}
+{"}"}
 
 function DependentsPage() {
   const [showAdd, setShowAdd] = useState(false);
@@ -1456,18 +1454,18 @@ onClick={() => setShowAdd(false)}>Cancel</button>
       )}
     </div>
   );
-}
+{"}"}
 
 function ChatPage() {
   const [active, setActive] = useState(0);
   const [msg, setMsg] = useState("");
   const [messages, setMessages] = useState(CHAT_MESSAGES);
-  const send = () => {
+  const send = () ={">"} {
     if (!msg.trim()) return;
     setMessages([...messages, { id: Date.now(), text: msg, sent: true, 
-time: "Now" }]);
+time: "Now" {"}"}]);
     setMsg("");
-  };
+  {"}"};
   return (
     <div>
       <div className="topbar"><div><div 
@@ -1541,7 +1539,7 @@ style={{ padding: "10px 16px" }}>Send</button>
       </div>
     </div>
   );
-}
+{"}"}
 
 function DocumentsPage() {
   return (
@@ -1587,7 +1585,7 @@ padding: "6px 8px" }}>Download</button>
       </div>
     </div>
   );
-}
+{"}"}
 
 function AppointmentsPage() {
   return (
@@ -1622,7 +1620,7 @@ btn-sm">Reschedule</button>
       </div>
     </div>
   );
-}
+{"}"}
 
 function WellnessPage() {
   return (
@@ -1705,7 +1703,7 @@ fontFamily: "'Syne',sans-serif" }}>{m.tag}</div>
       </div>
     </div>
   );
-}
+{"}"}
 
 function InsurancePage() {
   return (
@@ -1797,7 +1795,7 @@ btn-sm">View</button></td>
       </div>
     </div>
   );
-}
+{"}"}
 
 function Transactions() {
   return (
@@ -1829,7 +1827,7 @@ className="txn-date">{t.date}</div></div>
       </div>
     </div>
   );
-}
+{"}"}
 
 function Settings() {
   return (
@@ -1874,7 +1872,7 @@ width: 20, height: 20, background: "white", borderRadius: "50%" }} />
       </div>
     </div>
   );
-}
+{"}"}
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -1893,7 +1891,7 @@ export default function App() {
     dependents: <DependentsPage />,
     insurance: <InsurancePage />,
     settings: <Settings />,
-  };
+  {"}"};
 
   if (!authed) return <><style>{styles}</style><AuthScreen onLogin={() => 
 setAuthed(true)} /></>;
@@ -1910,4 +1908,4 @@ pages.dashboard}</div>
       </div>
     </>
   );
-}
+{"}"}
