@@ -800,8 +800,7 @@ icon: "📄", size: "0.5 MB", date: "Feb 18, 2026" },
 "📑", size: "2.1 MB", date: "Jan 1, 2026" },
   { id: 4, name: "Annual Physical Report 2025", type: "report", icon: 
 "📊", size: "3.4 MB", date: "Dec 12, 2025" },
-  { id: 5, name: "X-Ray Chest Scan", type: "lab", icon: "🩻", size: "8.7 MB", 
-  date: "Nov 5, 2025" },
+  { id: 5, name: "X-Ray Chest Scan", type: "lab", icon: "🩻", size: "8.7 MB", date: "Nov 5, 2025" },
   { id: 6, name: "Malaria Test Negative", type: "lab", icon: "🔬", size: 
 "0.8 MB", date: "Oct 28, 2025" },
 ];
