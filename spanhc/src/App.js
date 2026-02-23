@@ -572,8 +572,7 @@ size: "1.2 MB", date: "Feb 20, 2026", bg: "#eff6ff", color: "#1d4ed8" },
   { id: 4, name: "Annual Physical Report 2025", type: "report", label: 
 "RPT", size: "3.4 MB", date: "Dec 12, 2025", bg: "#fef3c7", color: 
 "#92400e" },
-  { id: 5, name: "X-Ray Chest Scan", type: "lab", label: "IMG", size: "8.7 MB",
-  date: "Nov 5, 2025", bg: "#eff6ff", color: "#1d4ed8" },
+  { id: 5, name: "X-Ray Chest Scan", type: "lab", label: "IMG", size: "8.7 MB", date: "Nov 5, 2025", bg: "#eff6ff", color: "#1d4ed8" },
   { id: 6, name: "Malaria Test Negative", type: "lab", label: "LAB", size: 
 "0.8 MB", date: "Oct 28, 2025", bg: "#eff6ff", color: "#1d4ed8" },
 ];
