@@ -588,8 +588,7 @@ doctor: "Dr. Ibrahim Musa", type: "In-Person" },
 ];
 
 const CLAIMS = [
-  { id: "CLM-001", service: "General Consultation", doctor: "Dr. Amira 
-Osei", date: "Feb 20", amount: "N5,000", status: "approved" },
+  { id: "CLM-001", service: "General Consultation", doctor: "Dr. Amira Osei", date: "Feb 20", amount: "N5,000", status: "approved" },
   { id: "CLM-002", service: "Full Blood Count", doctor: "Lab Services", 
 date: "Feb 18", amount: "N12,000", status: "pending" },
   { id: "CLM-003", service: "Medications", doctor: "Pharmacy", date: "Feb 
