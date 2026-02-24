@@ -435,7 +435,12 @@ function AuthScreen({ onLogin }) {
     <div className="auth-screen">
       <div className="auth-left">
         <div className="auth-logo">
-        <img src={logo} alt="Span Healthcare" style={{ height: 52, width: 'auto' }} />
+        <div className="auth-logo-icon">SPAN</div>
+          <div>
+            <div className="auth-logo-text">Span Healthcare</div>
+            <div className="auth-logo-sub">Health Savings Platform</div>
+          </div>
+        </div>
         <div className="auth-headline">Your Health,<br /><span>Your Savings,</span><br />One Platform.</div>
         <div className="auth-sub">A complete health finance ecosystem. Save for healthcare, consult doctors instantly, and manage your family health records seamlessly.</div>
         <div className="auth-features">
