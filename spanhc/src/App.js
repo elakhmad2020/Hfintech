@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import logo from './image/span-logo.png';
+
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
 
