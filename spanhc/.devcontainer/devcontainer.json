@@ -1,0 +1,5 @@
+{
+  "name": "Span Healthcare",
+  "postCreateCommand": "npm install",
+  "forwardPorts": [3000]
+}

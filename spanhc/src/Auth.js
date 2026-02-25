@@ -22,7 +22,10 @@ export async function registerUser({ name, email, phone, password, dob, sex }) {
       email,
       password,
     });
-    if (authError) throw authError;
+    if (authError) {
+      console.log("SUPABASE AUTH ERROR:", JSON.stringify(authError));
+      throw authError;
+    }
 
     const userId = authData.user.id;
     const spanID = generateSpanID(name);
