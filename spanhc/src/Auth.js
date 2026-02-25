@@ -18,6 +18,8 @@ function generateAccountNumber() {
 export async function registerUser({ name, email, phone, password, dob, sex }) {
   try {
     // 1. Create auth user
+    console.log("REGISTERING WITH:", { name, email, phone, dob, sex, passwordLength: password?.length });
+    console.log("EMAIL:", email, "PASSWORD LENGTH:", password ? password.length : "EMPTY");
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -36,7 +38,7 @@ export async function registerUser({ name, email, phone, password, dob, sex }) {
       span_id: spanID,
       full_name: name,
       phone,
-      date_of_birth: dob,
+      date_of_birth: dob || null,
       sex,
     });
     if (profileError) throw profileError;

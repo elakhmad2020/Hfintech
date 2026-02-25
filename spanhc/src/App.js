@@ -522,8 +522,14 @@ function AuthScreen({ onLogin }) {
               </>}
 
               {mode === "register" && step === 2 && <>
-                <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="Create a strong password" /></div>
-                <div className="form-group"><label className="form-label">Confirm Password</label><input className="form-input" type="password" placeholder="Repeat password" /></div>
+  <div className="form-group">
+    <label className="form-label">Password</label>
+    <input className="form-input" type="password" placeholder="Create a strong password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+  </div>
+  <div className="form-group">
+    <label className="form-label">Confirm Password</label>
+    <input className="form-input" type="password" placeholder="Repeat password" value={form.confirmPassword} onChange={e => setForm({ ...form, confirmPassword: e.target.value })} />
+  </div>
                 <div className="consent-box">
                   <div className="consent-title">Data Protection and Consent</div>
                   <div className="consent-text">Span Healthcare collects and processes your personal and health data in accordance with the Nigeria Data Protection Regulation (NDPR). Your data is encrypted, securely stored, and will never be shared with third parties without your explicit consent except as required by law.</div>
