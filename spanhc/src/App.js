@@ -428,11 +428,41 @@ function AuthScreen({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [step, setStep] = useState(1);
   const [consent, setConsent] = useState(false);
-  const [form, setForm] = useState({ email: "", phone: "", name: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ email: "", phone: "", name: "", password: "", confirmPassword: "", dob: "", sex: "Male" });
 
-  const next = () => {
+  const next = async () => {
+    setError("");
     if (mode === "register" && step === 1) { setStep(2); return; }
-    if (mode === "register" && step === 2) { setStep(3); return; }
+
+    if (mode === "register" && step === 2) {
+      if (form.password !== form.confirmPassword) { setError("Passwords do not match"); return; }
+      if (!consent) { setError("Please accept the terms to continue"); return; }
+      setLoading(true);
+      const result = await registerUser({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        password: form.password,
+        dob: form.dob,
+        sex: form.sex,
+      });
+      setLoading(false);
+      if (!result.success) { setError(result.error); return; }
+      setStep(3);
+      return;
+    }
+
+    if (mode === "login") {
+      setLoading(true);
+      const result = await loginUser({ email: form.email, password: form.password });
+      setLoading(false);
+      if (!result.success) { setError(result.error); return; }
+      onLogin(result.user);
+      return;
+    }
+
     onLogin();
   };
 
@@ -510,6 +540,7 @@ function AuthScreen({ onLogin }) {
                 <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
               </>}
 
+              {error && <div style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>{error}</div>}
               <button className="btn btn-primary" onClick={next} disabled={mode === "register" && step === 2 && !consent}>
                 {mode === "login" ? "Log In" : step === 1 ? "Continue" : "Create Account"}
               </button>
@@ -1357,10 +1388,35 @@ export default function App() {
   const [authed, setAuthed] = useState(false);
   const [page, setPage] = useState("dashboard");
   const [userPhoto] = useState(null);
-  const [userName] = useState("Emeka Okafor");
+  const [userName, setUserName] = useState("Loading...");
+  const [userId, setUserId] = useState(null);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    getCurrentUser().then(user => {
+      if (user) {
+        setAuthed(true);
+        setUserId(user.id);
+        getProfile(user.id).then(profile => {
+          if (profile) setUserName(profile.full_name);
+        }).catch(() => {});
+      }
+    });
+  }, []);
+
+  const handleLogin = (user) => {
+    setAuthed(true);
+    setUserId(user.id);
+    getProfile(user.id).then(profile => {
+      if (profile) setUserName(profile.full_name);
+    }).catch(() => {});
+    setPage("dashboard");
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
     setAuthed(false);
+    setUserId(null);
+    setUserName("Loading...");
     setPage("dashboard");
   };
 
@@ -1379,7 +1435,7 @@ export default function App() {
     settings: <Settings />,
   };
 
-  if (!authed) return <><style>{styles}</style><AuthScreen onLogin={() => setAuthed(true)} /></>;
+  if (!authed) return <><style>{styles}</style><AuthScreen onLogin={handleLogin} /></>;
 
   return (
     <>
