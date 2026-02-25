@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { registerUser, loginUser, logoutUser, getCurrentUser, getProfile, getWallet, getTransactions } from './Auth';
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
@@ -99,7 +100,7 @@ const styles = `
 
   .main-layout { display: flex; min-height: 100vh; }
   .sidebar { width: 248px; min-height: 100vh; background: var(--navy); display: flex; flex-direction: column; position: fixed; left: 0; top: 0; bottom: 0; z-index: 100; }
-  .sidebar-logo { padding: 22px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 10px; }
+  .sidebar-logo { padding: 22px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.12); }
   .sidebar-logo-icon { width: 34px; height: 34px; background: var(--primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: white; font-family: 'Montserrat', sans-serif; letter-spacing: 0.3px; }
   .sidebar-logo-img { height: 34px; width: auto; object-fit: contain; }
   .sidebar-logo-name { font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 800; color: white; line-height: 1.2; }
@@ -446,10 +447,6 @@ function AuthScreen({ onLogin }) {
             onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
           />
           <div className="auth-logo-icon" style={{ display: "none" }}>SPAN</div>
-          <div>
-            <div className="auth-logo-text">Span Healthcare</div>
-            <div className="auth-logo-sub">Health Savings Platform</div>
-          </div>
         </div>
         <div className="auth-headline">Your Health,<br /><span>Your Savings,</span><br />One Platform.</div>
         <div className="auth-sub">A complete health finance ecosystem. Save for healthcare, consult doctors instantly, and manage your family health records seamlessly.</div>
