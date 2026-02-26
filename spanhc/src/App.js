@@ -541,10 +541,17 @@ function AuthScreen({ onLogin }) {
               </>}
 
               {mode === "login" && <>
-                <div className="form-group"><label className="form-label">Email or Phone</label><input className="form-input" placeholder="you@email.com or +234..." /></div>
-                <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="Enter password" /></div>
+  <div className="form-group">
+    <label className="form-label">Email or Phone</label>
+    <input className="form-input" placeholder="you@email.com or +234..." value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+  </div>
+  <div className="form-group">
+    <label className="form-label">Password</label>
+    <input className="form-input" type="password" placeholder="Enter password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+  </div>
+  <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
+</>}
                 <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
-              </>}
 
               {error && <div style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>{error}</div>}
               <button className="btn btn-primary" onClick={next} disabled={mode === "register" && step === 2 && !consent}>
