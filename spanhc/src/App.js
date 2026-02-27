@@ -551,19 +551,13 @@ function AuthScreen({ onLogin }) {
   </div>
   <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
 </>}
-                <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
-
               {error && <div style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>{error}</div>}
               <button className="btn btn-primary" onClick={next} disabled={mode === "register" && step === 2 && !consent}>
                 {mode === "login" ? "Log In" : step === 1 ? "Continue" : "Create Account"}
               </button>
 
               {mode === "login" && <>
-                <div className="divider"><div className="divider-line" /><span className="divider-text">or continue with</span><div className="divider-line" /></div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button className="btn btn-outline" style={{ flex: 1, justifyContent: "center" }}>Google</button>
-                  <button className="btn btn-outline" style={{ flex: 1, justifyContent: "center" }}>Facebook</button>
-                </div>
+                
               </>}
             </>
           )}
@@ -576,8 +570,8 @@ function AuthScreen({ onLogin }) {
 function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   const sections = [
     { label: "", items: [{ id: "dashboard", label: "Dashboard", short: "DB" }, { id: "wallet", label: "Wallet", short: "WL" }, { id: "transactions", label: "Transactions", short: "TX" }] },
-    { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM", badge: "3" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG", badge: "3" }, { id: "documents", label: "Documents", short: "DOC" }, { id: "wellness", label: "Wellness", short: "WN" }] },
-    { label: "Account", items: [{ id: "profile", label: "My Profile", short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { id: "claims", label: "Claims", short: "CL" }, { id: "settings", label: "Settings", short: "ST" }] },
+    { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM", badge: "3" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG", badge: "3" }, { id: "documents", label: "Documents", short: "DOC" }] },
+    { label: "Account", items: [{ id: "profile", label: "My Profile", short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { id: "settings", label: "Settings", short: "ST" }] },
   ];
   const initials = userName ? userName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() : "EO";
   return (
@@ -620,11 +614,11 @@ function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   );
 }
 
-function Dashboard({ onNav }) {
+function Dashboard({ onNav, userName }) {
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Good morning, Emeka</div><div className="page-sub">Tuesday, February 24, 2026</div></div>
+        <div><div className="page-title">Good morning, {userName ? userName.split(' ')[0] : ''}!</div><div className="page-sub">Tuesday, February 24, 2026</div></div>
         <button className="btn btn-primary btn-sm" onClick={() => onNav("telemedicine")}>+ Book Appointment</button>
       </div>
       <div className="stats-grid">
@@ -1434,7 +1428,7 @@ export default function App() {
   };
 
   const pages = {
-    dashboard: <Dashboard onNav={setPage} />,
+    dashboard: <Dashboard onNav={setPage} userName={userName} />,
     wallet: <WalletPage />,
     transactions: <Transactions />,
     telemedicine: <TelemedicinePage />,
