@@ -618,7 +618,7 @@ function Dashboard({ onNav, userName }) {
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Good morning, {userName ? userName.split(' ')[0] : ''}!</div><div className="page-sub">Tuesday, February 24, 2026</div></div>
+        <div><div className="page-title">Hello, {userName ? userName.split(' ')[0] : ''}!</div><div className="page-sub">Tuesday, February 24, 2026</div></div>
         <button className="btn btn-primary btn-sm" onClick={() => onNav("telemedicine")}>+ Book Appointment</button>
       </div>
       <div className="stats-grid">
@@ -793,21 +793,67 @@ function WalletPage() {
   );
 }
 
-function ProfilePage() {
+function ProfilePage({ userId }) {
   const [editing, setEditing] = useState(false);
   const [photo, setPhoto] = useState(null);
   const [showID, setShowID] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [profile, setProfile] = useState(null);
   const fileRef = useRef();
-  const spanID = generateSpanID("Emeka Okafor");
 
-  const handlePhoto = (e) => {
+  useEffect(() => {
+    if (!userId) return;
+    getProfile(userId).then(p => {
+      if (p) {
+        setProfile(p);
+        if (p.avatar_url) setPhoto(p.avatar_url);
+      }
+    }).catch(e => console.log('Profile load error:', e));
+  }, [userId]);
+
+  const handleSave = async () => {
+    if (!userId || !profile) return;
+    setSaving(true);
+    try {
+      await updateProfile(userId, {
+        full_name: profile.full_name,
+        phone: profile.phone,
+        date_of_birth: profile.date_of_birth,
+        sex: profile.sex,
+        blood_group: profile.blood_group,
+        genotype: profile.genotype,
+        height: profile.height,
+        weight: profile.weight,
+        allergies: profile.allergies,
+        chronic_conditions: profile.chronic_conditions,
+        current_medications: profile.current_medications,
+        emergency_contact_name: profile.emergency_contact_name,
+        emergency_contact_relation: profile.emergency_contact_relation,
+        emergency_contact_phone: profile.emergency_contact_phone,
+      });
+      setEditing(false);
+    } catch(e) {
+      console.log('Save error:', e);
+    }
+    setSaving(false);
+  };
+
+  const handlePhoto = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setPhoto(ev.target.result);
-      reader.readAsDataURL(file);
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setPhoto(ev.target.result);
+    reader.readAsDataURL(file);
+    try {
+      const url = await uploadAvatar(userId, file);
+      await updateProfile(userId, { avatar_url: url });
+      setPhoto(url);
+    } catch(e) {
+      console.log('Upload error:', e);
     }
   };
+
+  const spanID = profile?.span_id || generateSpanID(profile?.full_name || '');
 
   return (
     <div>
@@ -815,7 +861,7 @@ function ProfilePage() {
         <div><div className="page-title">My Profile</div><div className="page-sub">Manage your health identity</div></div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline btn-sm" onClick={() => setShowID(true)}>View ID Card</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setEditing(!editing)}>{editing ? "Save Changes" : "Edit Profile"}</button>
+          <button className="btn btn-primary btn-sm" onClick={() => editing ? handleSave() : setEditing(true)}>{saving ? "Saving..." : editing ? "Save Changes" : "Edit Profile"}</button>
         </div>
       </div>
       <div style={{ display: "flex", gap: 20, marginBottom: 24 }}>
@@ -830,8 +876,8 @@ function ProfilePage() {
         <div className="profile-id-card" style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div className="profile-name">Emeka Okafor</div>
-              <div className="profile-id">{spanID}</div>
+            <div className="profile-name">{profile?.full_name || 'Loading...'}</div>
+            <div className="profile-id">{spanID}</div>
               <div className="profile-tags">
                 <span className="profile-tag">Principal Member</span>
                 <span className="profile-tag" style={{ background: "#dcfce7", color: "var(--success)" }}>Active</span>
@@ -848,9 +894,8 @@ function ProfilePage() {
         <div className="card">
           <div className="card-title" style={{ marginBottom: 18 }}>Personal Information</div>
           <div className="form-grid-2">
-            {[{ label: "First Name", value: "Emeka" }, { label: "Last Name", value: "Okafor" }, { label: "Phone Number", value: "+234 803 456 7890" }, { label: "Email", value: "emeka.okafor@email.com" }].map(f => (
-              <div key={f.label} className="form-group"><label className="form-label">{f.label}</label><input className="form-input" defaultValue={f.value} disabled={!editing} /></div>
-            ))}
+          <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={profile?.full_name || ''} disabled={!editing} onChange={e => setProfile({...profile, full_name: e.target.value})} /></div>
+          <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" value={profile?.phone || ''} disabled={!editing} onChange={e => setProfile({...profile, phone: e.target.value})} /></div>
             <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" defaultValue="1989-05-14" disabled={!editing} /></div>
             <div className="form-group"><label className="form-label">Sex</label><select className="form-select" disabled={!editing}><option>Male</option><option>Female</option></select></div>
           </div>
@@ -1436,7 +1481,7 @@ export default function App() {
     chat: <ChatPage />,
     documents: <DocumentsPage />,
     wellness: <WellnessPage />,
-    profile: <ProfilePage />,
+    profile: <ProfilePage userId={userId} />,
     dependents: <DependentsPage />,
     claims: <ClaimsPage />,
     settings: <Settings />,
