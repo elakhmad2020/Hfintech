@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { registerUser, loginUser, logoutUser, getCurrentUser, getProfile, getWallet, getTransactions } from './Auth';
+import { registerUser, loginUser, logoutUser, getCurrentUser, getProfile, getWallet, getTransactions, updateProfile, uploadAvatar } from './Auth';
+import { supabase } from './supabase';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
@@ -424,37 +427,84 @@ const CHAT_MESSAGES = [
   { id: 6, text: "Do not worry, we will get to the bottom of this. Your results from last week look great.", sent: false, time: "10:32 AM" },
 ];
 
-function AuthScreen({ onLogin }) {
+function AuthScreen({ onLogin, onDoctorLogin }) {
   const [mode, setMode] = useState("login");
+  const [userType, setUserType] = useState("patient");
   const [step, setStep] = useState(1);
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ email: "", phone: "", name: "", password: "", confirmPassword: "", dob: "", sex: "Male" });
+  const [form, setForm] = useState({
+    email: "", phone: "", name: "", password: "", confirmPassword: "",
+    dob: "", sex: "Male", specialty: "", experience_years: "", bio: ""
+  });
+
+  const SPECIALTIES = [
+    "General Practitioner", "Cardiologist", "Pediatrician", "Dermatologist",
+    "Gynecologist", "Dentist", "Orthopedist", "Neurologist", "Psychiatrist",
+    "Ophthalmologist", "ENT Specialist", "Urologist", "Oncologist", "Other"
+  ];
 
   const next = async () => {
     setError("");
-    if (mode === "register" && step === 1) { setStep(2); return; }
 
-    if (mode === "register" && step === 2) {
+    // ── PATIENT REGISTER ──
+    if (userType === "patient" && mode === "register" && step === 1) {
+      if (!form.name || !form.email) { setError("Please fill in your name and email"); return; }
+      setStep(2); return;
+    }
+    if (userType === "patient" && mode === "register" && step === 2) {
       if (form.password !== form.confirmPassword) { setError("Passwords do not match"); return; }
       if (!consent) { setError("Please accept the terms to continue"); return; }
       setLoading(true);
       const result = await registerUser({
-        name: form.name,
-        email: form.email,
-        phone: form.phone,
-        password: form.password,
-        dob: form.dob,
-        sex: form.sex,
+        name: form.name, email: form.email, phone: form.phone,
+        password: form.password, dob: form.dob, sex: form.sex,
       });
       setLoading(false);
       if (!result.success) { setError(result.error); return; }
-      setStep(3);
-      return;
+onLogin(result.user);
+return;
     }
 
-    if (mode === "login") {
+    // ── DOCTOR REGISTER ──
+    if (userType === "doctor" && mode === "register" && step === 1) {
+      if (!form.name || !form.email || !form.specialty) { setError("Please fill in all required fields"); return; }
+      setStep(2); return;
+    }
+    if (userType === "doctor" && mode === "register" && step === 2) {
+      if (form.password !== form.confirmPassword) { setError("Passwords do not match"); return; }
+      if (!consent) { setError("Please accept the terms to continue"); return; }
+      setLoading(true);
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+        });
+        if (authError) throw authError;
+        const { error: profileError } = await supabase.from('doctors').insert({
+          user_id: authData.user.id,
+          full_name: form.name,
+          email: form.email,
+          phone: form.phone,
+          specialty: form.specialty,
+          bio: form.bio,
+          experience_years: parseInt(form.experience_years) || 0,
+          status: 'pending',
+          is_available: false,
+        });
+        if (profileError) throw profileError;
+      } catch(e) {
+        setLoading(false);
+        setError(e.message); return;
+      }
+      setLoading(false);
+      setStep(3); return;
+    }
+
+    // ── PATIENT LOGIN ──
+    if (userType === "patient" && mode === "login") {
+      if (!form.email || !form.password) { setError("Please enter your email and password"); return; }
       setLoading(true);
       const result = await loginUser({ email: form.email, password: form.password });
       setLoading(false);
@@ -463,7 +513,40 @@ function AuthScreen({ onLogin }) {
       return;
     }
 
+    // ── DOCTOR LOGIN ──
+    if (userType === "doctor" && mode === "login") {
+      if (!form.email || !form.password) { setError("Please enter your email and password"); return; }
+      setLoading(true);
+      try {
+        const { data, error: loginError } = await supabase.auth.signInWithPassword({
+          email: form.email, password: form.password,
+        });
+        if (loginError) throw loginError;
+        const { data: doctorData, error: docError } = await supabase
+  .from('doctors')
+  .select('*')
+  .eq('user_id', data.user.id)
+  .single();
+if (docError || !doctorData) throw new Error("No doctor profile found for this account");
+if (doctorData.status === 'pending') throw new Error("Your account is pending approval. You will receive an email once approved.");
+if (doctorData.status === 'rejected') throw new Error("Your application was not approved. Please contact support.");
+setLoading(false);
+onDoctorLogin(data.user, doctorData);
+      } catch(e) {
+        setLoading(false);
+        setError(e.message);
+      }
+      return;
+    }
+
     onLogin();
+  };
+
+  const switchUserType = (type) => {
+    setUserType(type);
+    setStep(1);
+    setError("");
+    setForm({ email: "", phone: "", name: "", password: "", confirmPassword: "", dob: "", sex: "Male", specialty: "", experience_years: "", bio: "" });
   };
 
   return (
@@ -478,87 +561,163 @@ function AuthScreen({ onLogin }) {
           />
           <div className="auth-logo-icon" style={{ display: "none" }}>SPAN</div>
         </div>
-        <div className="auth-headline">Your Health,<br /><span>Your Savings,</span><br />One Platform.</div>
-        <div className="auth-sub">A complete health finance ecosystem. Save for healthcare, consult doctors instantly, and manage your family health records seamlessly.</div>
+        <div className="auth-headline">
+          {userType === "doctor" ? <>Join as a<br /><span>Healthcare</span><br />Professional.</> : <>Your Health,<br /><span>Your Savings,</span><br />One Platform.</>}
+        </div>
+        <div className="auth-sub">
+          {userType === "doctor"
+            ? "Register as a doctor on Span Healthcare. Reach patients, manage consultations, and grow your practice digitally."
+            : "A complete health finance ecosystem. Save for healthcare, consult doctors instantly, and manage your family health records seamlessly."}
+        </div>
         <div className="auth-features">
-          {[
+          {userType === "doctor" ? [
+            "Set your availability and specialties",
+            "Video, audio and chat consultations",
+            "Flat rate N1,000 consultation fee",
+            "Manage appointments from your dashboard",
+            "Pending approval before going live",
+          ] : [
             "Health Savings Wallet — save anytime",
             "Telemedicine via video, audio and chat",
             "Family profile and dependent management",
             "Wellness tracking and health scoring",
             "Secure medical document vault",
           ].map(f => (
-            <div key={f} className="auth-feature"><div className="auth-feature-dot" />{f}</div>
+            <div key={f} className="auth-feature">
+              <div className="auth-feature-dot" />{f}
+            </div>
           ))}
         </div>
       </div>
 
       <div className="auth-right">
         <div className="auth-form-container">
+
+          {/* User type switcher */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 24, border: '1.5px solid #dce8eb', borderRadius: 10, overflow: 'hidden' }}>
+            <button
+              onClick={() => switchUserType('patient')}
+              style={{ flex: 1, padding: '10px', fontFamily: "'Montserrat',sans-serif", fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: userType === 'patient' ? 'var(--primary)' : 'white', color: userType === 'patient' ? 'white' : 'var(--slate)' }}
+            >
+              Patient
+            </button>
+            <button
+              onClick={() => switchUserType('doctor')}
+              style={{ flex: 1, padding: '10px', fontFamily: "'Montserrat',sans-serif", fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: userType === 'doctor' ? 'var(--primary)' : 'white', color: userType === 'doctor' ? 'white' : 'var(--slate)' }}
+            >
+              Doctor
+            </button>
+          </div>
+
           {step === 3 ? (
             <div className="verify-screen">
-              <div style={{ width: 72, height: 72, borderRadius: 18, background: "var(--primary-pale)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px", fontWeight: 800, fontSize: 15, color: "var(--primary)", fontFamily: "'Montserrat',sans-serif" }}>OTP</div>
-              <div className="verify-title">Verify your account</div>
-              <div className="verify-sub">We sent a 6-digit code to<br /><strong>{form.email || form.phone}</strong></div>
-              <div className="otp-inputs">{[0,1,2,3,4,5].map(i => <input key={i} className="otp-input" maxLength={1} type="text" />)}</div>
-              <button className="btn btn-primary" onClick={onLogin}>Verify and Continue</button>
-              <p style={{ marginTop: 14, fontSize: 12, color: "var(--slate)", textAlign: "center", fontFamily: "'Manrope',sans-serif" }}>Did not get it? <span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Resend code</span></p>
+              <div style={{ width: 72, height: 72, borderRadius: 18, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontWeight: 800, fontSize: 15, color: 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>
+                {userType === 'doctor' ? 'PEND' : 'OTP'}
+              </div>
+              {userType === 'doctor' ? (
+                <>
+                  <div className="verify-title">Application Submitted</div>
+                  <div className="verify-sub">
+                    Your doctor profile has been submitted for review.<br />
+                    <strong>You will receive an email once approved.</strong><br />
+                    After approval you can log in and start accepting consultations.
+                  </div>
+                  <button className="btn btn-primary" onClick={() => { setStep(1); setMode('login'); }}>
+                    Back to Login
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="verify-title">Verify your account</div>
+                  <div className="verify-sub">We sent a 6-digit code to<br /><strong>{form.email || form.phone}</strong></div>
+                  <div className="otp-inputs">
+                    {[0,1,2,3,4,5].map(i => <input key={i} className="otp-input" maxLength={1} type="text" />)}
+                  </div>
+                  <button className="btn btn-primary" onClick={onLogin}>Verify and Continue</button>
+                  <p style={{ marginTop: 14, fontSize: 12, color: 'var(--slate)', textAlign: 'center', fontFamily: "'Manrope',sans-serif" }}>
+                    Did not get it? <span style={{ color: 'var(--primary)', fontWeight: 700, cursor: 'pointer' }}>Resend code</span>
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <>
-              <div className="auth-form-title">{mode === "login" ? "Welcome back" : "Create account"}</div>
-              <div className="auth-form-sub">{mode === "login" ? "Log in to your Span Healthcare dashboard" : step === 1 ? "Step 1 of 2 - Personal details" : "Step 2 of 2 - Set your password"}</div>
-              <div className="auth-tabs">
-                <button className={"auth-tab" + (mode === "login" ? " active" : "")} onClick={() => { setMode("login"); setStep(1); }}>Log In</button>
-                <button className={"auth-tab" + (mode === "register" ? " active" : "")} onClick={() => { setMode("register"); setStep(1); }}>Register</button>
+              <div className="auth-form-title">
+                {mode === 'login'
+                  ? userType === 'doctor' ? 'Doctor Login' : 'Welcome back'
+                  : userType === 'doctor' ? 'Doctor Registration' : 'Create account'}
+              </div>
+              <div className="auth-form-sub">
+                {mode === 'login'
+                  ? userType === 'doctor' ? 'Access your doctor dashboard' : 'Log in to your Span Healthcare dashboard'
+                  : step === 1 ? 'Step 1 of 2 - Personal details' : 'Step 2 of 2 - Set your password'}
               </div>
 
-              {mode === "register" && step === 1 && <>
+              <div className="auth-tabs">
+                <button className={"auth-tab" + (mode === "login" ? " active" : "")} onClick={() => { setMode("login"); setStep(1); setError(""); }}>Log In</button>
+                <button className={"auth-tab" + (mode === "register" ? " active" : "")} onClick={() => { setMode("register"); setStep(1); setError(""); }}>Register</button>
+              </div>
+
+              {/* PATIENT REGISTER STEP 1 */}
+              {userType === "patient" && mode === "register" && step === 1 && <>
                 <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
                 <div className="form-group"><label className="form-label">Email Address</label><input className="form-input" type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
                 <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" /></div>
-                <div className="form-group"><label className="form-label">Sex</label><select className="form-select"><option>Male</option><option>Female</option><option>Prefer not to say</option></select></div>
+                <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Sex</label><select className="form-select" value={form.sex} onChange={e => setForm({ ...form, sex: e.target.value })}><option>Male</option><option>Female</option><option>Prefer not to say</option></select></div>
               </>}
 
+              {/* DOCTOR REGISTER STEP 1 */}
+              {userType === "doctor" && mode === "register" && step === 1 && <>
+                <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" placeholder="Dr. First Last" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Email Address</label><input className="form-input" type="email" placeholder="doctor@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" type="tel" placeholder="+234 8XX XXX XXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Specialty</label>
+                  <select className="form-select" value={form.specialty} onChange={e => setForm({ ...form, specialty: e.target.value })}>
+                    <option value="">Select specialty</option>
+                    {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="form-group"><label className="form-label">Years of Experience</label><input className="form-input" type="number" placeholder="e.g. 8" value={form.experience_years} onChange={e => setForm({ ...form, experience_years: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Short Bio</label><textarea className="form-textarea" rows={3} placeholder="Brief description of your practice and expertise..." value={form.bio} onChange={e => setForm({ ...form, bio: e.target.value })} /></div>
+              </>}
+
+              {/* STEP 2 — PASSWORD (both patient and doctor) */}
               {mode === "register" && step === 2 && <>
-  <div className="form-group">
-    <label className="form-label">Password</label>
-    <input className="form-input" type="password" placeholder="Create a strong password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
-  </div>
-  <div className="form-group">
-    <label className="form-label">Confirm Password</label>
-    <input className="form-input" type="password" placeholder="Repeat password" value={form.confirmPassword} onChange={e => setForm({ ...form, confirmPassword: e.target.value })} />
-  </div>
+                <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="Create a strong password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Confirm Password</label><input className="form-input" type="password" placeholder="Repeat password" value={form.confirmPassword} onChange={e => setForm({ ...form, confirmPassword: e.target.value })} /></div>
                 <div className="consent-box">
                   <div className="consent-title">Data Protection and Consent</div>
-                  <div className="consent-text">Span Healthcare collects and processes your personal and health data in accordance with the Nigeria Data Protection Regulation (NDPR). Your data is encrypted, securely stored, and will never be shared with third parties without your explicit consent except as required by law.</div>
+                  <div className="consent-text">
+                    {userType === 'doctor'
+                      ? "By registering as a doctor on Span Healthcare you agree to our platform terms, patient data protection policies, and medical consultation guidelines under NDPR."
+                      : "Span Healthcare collects and processes your personal and health data in accordance with the Nigeria Data Protection Regulation (NDPR)."}
+                  </div>
                   <label className="consent-check">
                     <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
-                    <span className="consent-check-label">I agree to the <span>Terms of Service</span>, <span>Privacy Policy</span>, and <span>Data Protection Policy</span>. I consent to processing of my health data by Span Healthcare.</span>
+                    <span className="consent-check-label">I agree to the <span>Terms of Service</span>, <span>Privacy Policy</span>, and <span>Data Protection Policy</span>.</span>
                   </label>
                 </div>
               </>}
 
+              {/* LOGIN FORM */}
               {mode === "login" && <>
-  <div className="form-group">
-    <label className="form-label">Email or Phone</label>
-    <input className="form-input" placeholder="you@email.com or +234..." value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-  </div>
-  <div className="form-group">
-    <label className="form-label">Password</label>
-    <input className="form-input" type="password" placeholder="Enter password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
-  </div>
-  <p style={{ textAlign: "right", marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}><span style={{ color: "var(--primary)", fontWeight: 700, cursor: "pointer" }}>Forgot password?</span></p>
-</>}
-              {error && <div style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>{error}</div>}
-              <button className="btn btn-primary" onClick={next} disabled={mode === "register" && step === 2 && !consent}>
-                {mode === "login" ? "Log In" : step === 1 ? "Continue" : "Create Account"}
-              </button>
-
-              {mode === "login" && <>
-                
+                <div className="form-group"><label className="form-label">Email</label><input className="form-input" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="Enter password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></div>
+                <p style={{ textAlign: 'right', marginBottom: 18, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}>
+                  <span style={{ color: 'var(--primary)', fontWeight: 700, cursor: 'pointer' }}>Forgot password?</span>
+                </p>
               </>}
+
+              {error && (
+                <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>
+                  {error}
+                </div>
+              )}
+
+              <button className="btn btn-primary" onClick={next} disabled={loading || (mode === "register" && step === 2 && !consent)}>
+                {loading ? 'Please wait...' : mode === 'login' ? 'Log In' : step === 1 ? 'Continue' : userType === 'doctor' ? 'Submit Application' : 'Create Account'}
+              </button>
             </>
           )}
         </div>
@@ -570,7 +729,7 @@ function AuthScreen({ onLogin }) {
 function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   const sections = [
     { label: "", items: [{ id: "dashboard", label: "Dashboard", short: "DB" }, { id: "wallet", label: "Wallet", short: "WL" }, { id: "transactions", label: "Transactions", short: "TX" }] },
-    { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM", badge: "3" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG", badge: "3" }, { id: "documents", label: "Documents", short: "DOC" }] },
+    { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG" }, { id: "documents", label: "Documents", short: "DOC" }] },
     { label: "Account", items: [{ id: "profile", label: "My Profile", short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { id: "settings", label: "Settings", short: "ST" }] },
   ];
   const initials = userName ? userName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() : "EO";
@@ -614,73 +773,232 @@ function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   );
 }
 
-function Dashboard({ onNav, userName }) {
+function Dashboard({ onNav, userName, userId }) {
+  const [wallet, setWallet] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [dependents, setDependents] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchAll();
+  }, [userId]);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const { data: walletData } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      setWallet(walletData);
+
+      const { data: txnData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(4);
+      setTransactions(txnData || []);
+
+      const { data: depData } = await supabase
+        .from('dependents')
+        .select('id')
+        .eq('user_id', userId);
+      setDependents(depData || []);
+
+      const { data: apptData } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'upcoming')
+        .order('date', { ascending: true })
+        .limit(2);
+      setAppointments(apptData || []);
+
+    } catch (e) {
+      console.error('Dashboard fetch error:', e.message);
+    }
+    setLoading(false);
+  };
+
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const monthlySpent = transactions
+    .filter(t => t.type === 'debit' && t.created_at >= startOfMonth)
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+
+  const fmt = (n) => `N${Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+
+  const getTxnStyle = (txn) => {
+    const desc = (txn.description || '').toLowerCase();
+    if (txn.type === 'credit') return { label: 'TOP', bg: '#dcfce7', color: '#166534' };
+    if (desc.includes('consult') || desc.includes('doctor')) return { label: 'MED', bg: '#fee2e2', color: '#991b1b' };
+    if (desc.includes('lab') || desc.includes('test')) return { label: 'LAB', bg: '#eff6ff', color: '#1d4ed8' };
+    if (desc.includes('pharma') || desc.includes('drug') || desc.includes('medic')) return { label: 'PHM', bg: '#f3e8ff', color: '#6b21a8' };
+    if (desc.includes('insur')) return { label: 'INS', bg: '#fef9c3', color: '#854d0e' };
+    return { label: 'TXN', bg: '#f4f9fa', color: '#5a7a8a' };
+  };
+
+  const formatTxnDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString())
+      return `Today, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    if (d.toDateString() === yesterday.toDateString())
+      return `Yesterday, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const formatApptDate = (iso) => {
+    if (!iso) return { time: '', date: '' };
+    const d = new Date(iso);
+    return {
+      time: d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
+      date: d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short' }),
+    };
+  };
+
+  const firstName = userName ? userName.split(' ')[0] : '';
+  const todayStr = new Date().toLocaleDateString('en-NG', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Hello, {userName ? userName.split(' ')[0] : ''}!</div><div className="page-sub">Tuesday, February 24, 2026</div></div>
-        <button className="btn btn-primary btn-sm" onClick={() => onNav("telemedicine")}>+ Book Appointment</button>
+        <div>
+          <div className="page-title">Hello, {firstName}!</div>
+          <div className="page-sub">{todayStr}</div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => onNav('telemedicine')}>
+          + Book Appointment
+        </button>
       </div>
+
       <div className="stats-grid">
-        {[
-          { label: "Wallet Balance", value: "N237,500", change: "Up N50k this month", up: true, tag: "WALLET", tagBg: "#e8f6f9", tagColor: "#2d8a9e" },
-          { label: "Total Spent on Health", value: "N28,700", change: "Down N3k vs last month", up: false, tag: "SPENT", tagBg: "#fee2e2", tagColor: "#991b1b" },
-          { label: "Dependents Covered", value: "5", change: "All active", up: true, tag: "FAMILY", tagBg: "#eff6ff", tagColor: "#1d4ed8" },
-          { label: "Upcoming Appointments", value: "2", change: "Next: Feb 24", up: true, tag: "APPT", tagBg: "#fef9c3", tagColor: "#854d0e" },
-        ].map(s => (
-          <div key={s.label} className="stat-card">
-            <span className="stat-tag" style={{ background: s.tagBg, color: s.tagColor }}>{s.tag}</span>
-            <div className="stat-value" style={{ marginTop: 6 }}>{s.value}</div>
-            <div className="stat-label">{s.label}</div>
-            <div className={"stat-change " + (s.up ? "up" : "down")}>{s.change}</div>
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#e8f6f9', color: '#2d8a9e' }}>WALLET</span>
+          <div className="stat-value" style={{ marginTop: 6 }}>
+            {loading ? '—' : fmt(wallet?.balance)}
           </div>
-        ))}
+          <div className="stat-label">Wallet Balance</div>
+          <div className="stat-change up">Available for health expenses</div>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#fee2e2', color: '#991b1b' }}>SPENT</span>
+          <div className="stat-value" style={{ marginTop: 6 }}>
+            {loading ? '—' : fmt(monthlySpent)}
+          </div>
+          <div className="stat-label">Spent This Month</div>
+          <div className="stat-change down">Health expenses this month</div>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#eff6ff', color: '#1d4ed8' }}>FAMILY</span>
+          <div className="stat-value" style={{ marginTop: 6 }}>
+            {loading ? '—' : dependents.length}
+          </div>
+          <div className="stat-label">Dependents Covered</div>
+          <div className="stat-change up">
+            {dependents.length > 0 ? 'All active on your plan' : 'No dependents added yet'}
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#fef9c3', color: '#854d0e' }}>APPT</span>
+          <div className="stat-value" style={{ marginTop: 6 }}>
+            {loading ? '—' : appointments.length}
+          </div>
+          <div className="stat-label">Upcoming Appointments</div>
+          <div className="stat-change up">
+            {appointments.length > 0
+              ? `Next: ${formatApptDate(appointments[0]?.date).date}`
+              : 'No upcoming appointments'}
+          </div>
+        </div>
       </div>
+
       <div className="dashboard-grid">
         <div>
           <div className="wallet-card" style={{ marginBottom: 20 }}>
             <div className="wallet-label">Health Savings Wallet</div>
-            <div className="wallet-amount">N237,500.00</div>
-            <div className="wallet-id">SPN-26-EO-48291</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <div style={{ padding: "5px 12px", background: "rgba(255,255,255,0.1)", borderRadius: 20, fontSize: 11, color: "rgba(255,255,255,0.75)", fontFamily: "'Manrope',sans-serif" }}>5 Dependents</div>
-              <div style={{ padding: "5px 12px", background: "rgba(255,255,255,0.1)", borderRadius: 20, fontSize: 11, color: "rgba(255,255,255,0.75)", fontFamily: "'Manrope',sans-serif" }}>Active Member</div>
+            <div className="wallet-amount">
+              {loading ? 'Loading...' : fmt(wallet?.balance)}
+            </div>
+            <div className="wallet-id">
+              {wallet?.account_number
+                ? `${wallet.account_number} · ${wallet.bank_name || 'Span Bank'}`
+                : 'Setting up your account...'}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
+                {dependents.length} Dependent{dependents.length !== 1 ? 's' : ''}
+              </div>
+              <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
+                Active Member
+              </div>
             </div>
             <div className="wallet-actions">
-              <button className="wallet-btn wallet-btn-primary">Fund Wallet</button>
-              <button className="wallet-btn wallet-btn-outline">Transfer</button>
-              <button className="wallet-btn wallet-btn-outline">Statement</button>
+              <button className="wallet-btn wallet-btn-primary" onClick={() => onNav('wallet')}>Fund Wallet</button>
+              <button className="wallet-btn wallet-btn-outline" onClick={() => onNav('wallet')}>Transfer</button>
+              <button className="wallet-btn wallet-btn-outline" onClick={() => onNav('transactions')}>Statement</button>
             </div>
           </div>
+
           <div className="card" style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div className="card-title">Recent Transactions</div>
-              <button className="btn btn-ghost btn-sm" onClick={() => onNav("transactions")}>View all</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => onNav('transactions')}>View all</button>
             </div>
-            <div className="txn-list">
-              {TRANSACTIONS.slice(0, 4).map(t => (
-                <div key={t.id} className="txn-item">
-                  <div className="txn-icon" style={{ background: t.bg, color: t.color }}>{t.label}</div>
-                  <div className="txn-info"><div className="txn-name">{t.name}</div><div className="txn-date">{t.date}</div></div>
-                  <div className={"txn-amount " + t.type}>{t.type === "credit" ? "+" : "-"}N{t.amount.toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+                Loading transactions...
+              </div>
+            ) : transactions.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+                No transactions yet. Fund your wallet to get started.
+              </div>
+            ) : (
+              <div className="txn-list">
+                {transactions.map(t => {
+                  const style = getTxnStyle(t);
+                  return (
+                    <div key={t.id} className="txn-item">
+                      <div className="txn-icon" style={{ background: style.bg, color: style.color }}>
+                        {style.label}
+                      </div>
+                      <div className="txn-info">
+                        <div className="txn-name">{t.description || 'Transaction'}</div>
+                        <div className="txn-date">{formatTxnDate(t.created_at)}</div>
+                      </div>
+                      <div className={`txn-amount ${t.type}`}>
+                        {t.type === 'credit' ? '+' : '-'}N{Number(t.amount).toLocaleString()}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
+
         <div>
-          <div className="health-score-card" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div><div className="card-title">Health Score</div><div className="card-sub">Based on activity and records</div></div>
-              <div className="health-score-value">82</div>
-            </div>
-            <div className="health-score-bar"><div className="health-score-fill" style={{ width: "82%" }} /></div>
-            <div style={{ marginTop: 10, fontSize: 12, color: "var(--primary)", fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>Good health habits detected</div>
-          </div>
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title" style={{ marginBottom: 14 }}>Quick Actions</div>
             <div className="quick-actions">
-              {[{ label: "See a Doctor", short: "DOC", page: "telemedicine" }, { label: "Fund Wallet", short: "PAY", page: "wallet" }, { label: "Dependents", short: "FAM", page: "dependents" }, { label: "Documents", short: "FIL", page: "documents" }].map(a => (
+              {[
+                { label: 'See a Doctor', short: 'DOC', page: 'telemedicine' },
+                { label: 'Fund Wallet', short: 'PAY', page: 'wallet' },
+                { label: 'Dependents', short: 'FAM', page: 'dependents' },
+                { label: 'Documents', short: 'FIL', page: 'documents' },
+              ].map(a => (
                 <div key={a.label} className="quick-action" onClick={() => onNav(a.page)}>
                   <div className="quick-action-icon">{a.short}</div>
                   <div className="quick-action-label">{a.label}</div>
@@ -688,21 +1006,44 @@ function Dashboard({ onNav, userName }) {
               ))}
             </div>
           </div>
+
           <div className="card">
             <div className="card-title" style={{ marginBottom: 14 }}>Upcoming Appointments</div>
-            <div className="schedule-list">
-              {APPOINTMENTS.slice(0, 2).map(a => (
-                <div key={a.id} className="appt-item" style={{ padding: "10px 12px" }}>
-                  <div style={{ minWidth: 56, textAlign: "center" }}>
-                    <div className="appt-time-val" style={{ fontSize: 13 }}>{a.time}</div>
-                    <div className="appt-time-date">{a.date}</div>
-                  </div>
-                  <div className="appt-divider" />
-                  <div style={{ flex: 1 }}><div className="appt-title" style={{ fontSize: 12 }}>{a.title}</div><div className="appt-doctor">{a.doctor}</div></div>
-                  <span className="badge badge-info">{a.type}</span>
-                </div>
-              ))}
-            </div>
+            {loading ? (
+              <div style={{ fontSize: 13, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+                Loading...
+              </div>
+            ) : appointments.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", textAlign: 'center', padding: '16px 0' }}>
+                No upcoming appointments.{' '}
+                <span
+                  style={{ color: 'var(--primary)', fontWeight: 700, cursor: 'pointer' }}
+                  onClick={() => onNav('telemedicine')}
+                >
+                  Book one now
+                </span>
+              </div>
+            ) : (
+              <div className="schedule-list">
+                {appointments.map(a => {
+                  const { time, date } = formatApptDate(a.date);
+                  return (
+                    <div key={a.id} className="appt-item" style={{ padding: '10px 12px' }}>
+                      <div style={{ minWidth: 56, textAlign: 'center' }}>
+                        <div className="appt-time-val" style={{ fontSize: 13 }}>{time}</div>
+                        <div className="appt-time-date">{date}</div>
+                      </div>
+                      <div className="appt-divider" />
+                      <div style={{ flex: 1 }}>
+                        <div className="appt-title" style={{ fontSize: 12 }}>{a.title || 'Consultation'}</div>
+                        <div className="appt-doctor">{a.doctor_name || 'Doctor'}</div>
+                      </div>
+                      <span className="badge badge-info">{a.type || 'Video'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -710,78 +1051,254 @@ function Dashboard({ onNav, userName }) {
   );
 }
 
-function WalletPage() {
+function WalletPage({ userId }) {
+  const [wallet, setWallet] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showFund, setShowFund] = useState(false);
-  const [showTransfer, setShowTransfer] = useState(false);
   const [showStatement, setShowStatement] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchWalletData();
+  }, [userId]);
+
+  const fetchWalletData = async () => {
+    setLoading(true);
+    try {
+      const { data: walletData } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      setWallet(walletData);
+
+      const { data: txnData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      setTransactions(txnData || []);
+
+    } catch (e) {
+      console.error('Wallet fetch error:', e.message);
+    }
+    setLoading(false);
+  };
+
+  const fmt = (n) => `N${Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+
+  const getTxnStyle = (txn) => {
+    const desc = (txn.description || '').toLowerCase();
+    if (txn.type === 'credit') return { label: 'TOP', bg: '#dcfce7', color: '#166634' };
+    if (desc.includes('consult') || desc.includes('doctor')) return { label: 'MED', bg: '#fee2e2', color: '#991b1b' };
+    if (desc.includes('lab') || desc.includes('test')) return { label: 'LAB', bg: '#eff6ff', color: '#1d4ed8' };
+    if (desc.includes('pharma') || desc.includes('drug') || desc.includes('medic')) return { label: 'PHM', bg: '#f3e8ff', color: '#6b21a8' };
+    if (desc.includes('insur')) return { label: 'INS', bg: '#fef9c3', color: '#854d0e' };
+    return { label: 'TXN', bg: '#f4f9fa', color: '#5a7a8a' };
+  };
+
+  const formatTxnDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString())
+      return `Today, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    if (d.toDateString() === yesterday.toDateString())
+      return `Yesterday, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Wallet</div><div className="page-sub">Your health savings account</div></div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowFund(true)}>+ Fund Wallet</button>
+        <div>
+          <div className="page-title">Wallet</div>
+          <div className="page-sub">Your health savings account</div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowFund(true)}>
+          + Fund Wallet
+        </button>
       </div>
+
+      {/* Wallet card */}
       <div className="wallet-card" style={{ marginBottom: 24 }}>
         <div className="wallet-label">Available Balance</div>
-        <div className="wallet-amount">N237,500.00</div>
-        <div className="wallet-id">SPN-26-EO-48291</div>
+        <div className="wallet-amount">
+          {loading ? 'Loading...' : fmt(wallet?.balance)}
+        </div>
+        <div className="wallet-id">
+          {wallet?.account_number
+            ? `${wallet.account_number} · ${wallet.bank_name || 'Span Bank'}`
+            : 'Setting up your account...'}
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
+            Health Savings
+          </div>
+          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
+            Active
+          </div>
+        </div>
         <div className="wallet-actions">
-          <button className="wallet-btn wallet-btn-primary" onClick={() => setShowFund(true)}>Fund Wallet</button>
-          <button className="wallet-btn wallet-btn-outline" onClick={() => setShowTransfer(true)}>Transfer</button>
-          <button className="wallet-btn wallet-btn-outline" onClick={() => setShowStatement(true)}>Statement</button>
+          <button className="wallet-btn wallet-btn-primary" onClick={() => setShowFund(true)}>
+            Fund Wallet
+          </button>
+          <button className="wallet-btn wallet-btn-outline" onClick={() => setShowStatement(true)}>
+            Statement
+          </button>
         </div>
       </div>
+
+      {/* Notice banner */}
+      <div style={{ background: '#e8f6f9', border: '1.5px solid #98B7B9', borderRadius: 12, padding: '14px 18px', marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#2d8a9e', background: '#b0cccf', padding: '3px 8px', borderRadius: 6, fontFamily: "'Montserrat',sans-serif", flexShrink: 0, marginTop: 1 }}>INFO</div>
+        <div style={{ fontSize: 13, color: '#1a2f42', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+          Your health savings wallet is a <strong>dedicated account</strong>. Once funds are deposited they are reserved for your healthcare and cannot be transferred out. To add funds, click <strong>Fund Wallet</strong> and transfer to the account details shown.
+        </div>
+      </div>
+
+      {/* Transaction history */}
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 18 }}>All Transactions</div>
-        <div className="txn-list">
-          {TRANSACTIONS.map(t => (
-            <div key={t.id} className="txn-item">
-              <div className="txn-icon" style={{ background: t.bg, color: t.color }}>{t.label}</div>
-              <div className="txn-info"><div className="txn-name">{t.name}</div><div className="txn-date">{t.date}</div></div>
-              <div className={"txn-amount " + t.type}>{t.type === "credit" ? "+" : "-"}N{t.amount.toLocaleString()}</div>
+        <div className="card-title" style={{ marginBottom: 18 }}>Transaction History</div>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+            Loading transactions...
+          </div>
+        ) : transactions.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 11, color: 'var(--primary)', margin: '0 auto 14px', fontFamily: "'Montserrat',sans-serif" }}>EMPTY</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>No transactions yet</div>
+            <div style={{ fontSize: 13, color: 'var(--slate)', marginTop: 6, fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+              Fund your wallet by transferring to your dedicated account.<br />Your balance will update automatically once payment is confirmed.
             </div>
-          ))}
-        </div>
+            <button className="btn btn-primary btn-sm" style={{ marginTop: 16, width: 'auto' }} onClick={() => setShowFund(true)}>
+              View Account Details
+            </button>
+          </div>
+        ) : (
+          <div className="txn-list">
+            {transactions.map(t => {
+              const style = getTxnStyle(t);
+              return (
+                <div key={t.id} className="txn-item">
+                  <div className="txn-icon" style={{ background: style.bg, color: style.color }}>
+                    {style.label}
+                  </div>
+                  <div className="txn-info">
+                    <div className="txn-name">{t.description || 'Transaction'}</div>
+                    <div className="txn-date">{formatTxnDate(t.created_at)}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className={`txn-amount ${t.type}`}>
+                      {t.type === 'credit' ? '+' : '-'}N{Number(t.amount).toLocaleString()}
+                    </div>
+                    <span className={`badge ${t.type === 'credit' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10, marginTop: 3 }}>
+                      {t.type}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Fund Wallet Modal — shows DVA account details */}
       {showFund && (
         <div className="modal-overlay" onClick={() => setShowFund(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><div className="modal-title">Fund Wallet</div><button className="modal-close" onClick={() => setShowFund(false)}>X</button></div>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Fund Your Wallet</div>
+              <button className="modal-close" onClick={() => setShowFund(false)}>X</button>
+            </div>
             <div className="modal-body">
-              <div className="form-group"><label className="form-label">Amount (N)</label><input className="form-input" placeholder="Enter amount" type="number" /></div>
-              <div className="form-group"><label className="form-label">Payment Method</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 8 }}>
-                  {["Card", "Bank Transfer", "USSD"].map(m => <div key={m} style={{ border: "1.5px solid #dce8eb", borderRadius: 10, padding: 14, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--navy)", fontFamily: "'Manrope',sans-serif" }}>{m}</div>)}
+              <div style={{ background: 'var(--primary-pale)', border: '1.5px solid var(--secondary)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 16, fontFamily: "'Montserrat',sans-serif" }}>
+                  Your Dedicated Account Details
+                </div>
+
+                {/* Bank Name */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Bank Name</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>
+                    {wallet?.bank_name || 'Wema Bank'}
+                  </div>
+                </div>
+
+                {/* Account Number */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Account Number</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', letterSpacing: 2, fontFamily: "'Montserrat',sans-serif" }}>
+                      {wallet?.account_number || 'Pending setup'}
+                    </div>
+                    {wallet?.account_number && (
+                      <button
+                        onClick={() => copyToClipboard(wallet.account_number)}
+                        style={{ padding: '6px 14px', borderRadius: 8, border: '1.5px solid var(--primary)', background: copied ? 'var(--primary)' : 'white', color: copied ? 'white' : 'var(--primary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Montserrat',sans-serif", transition: 'all 0.2s' }}
+                      >
+                        {copied ? 'Copied!' : 'Copy'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Account Name */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Account Name</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>
+                    {wallet?.account_name || 'Span Healthcare'}
+                  </div>
                 </div>
               </div>
-              <button className="btn btn-primary" style={{ marginTop: 8 }}>Proceed to Pay</button>
+
+              <div style={{ background: '#fef9c3', border: '1.5px solid #e8a444', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: '#854d0e', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+                  <strong>How to fund:</strong> Transfer any amount to the account details above from any Nigerian bank. Your wallet balance will be updated automatically within a few minutes of payment confirmation.
+                </div>
+              </div>
+
+              <button className="btn btn-primary" onClick={() => setShowFund(false)}>
+                Done
+              </button>
             </div>
           </div>
         </div>
       )}
-      {showTransfer && (
-        <div className="modal-overlay" onClick={() => setShowTransfer(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><div className="modal-title">Transfer Funds</div><button className="modal-close" onClick={() => setShowTransfer(false)}>X</button></div>
-            <div className="modal-body">
-              <div className="form-group"><label className="form-label">Recipient Account Number</label><input className="form-input" placeholder="Enter account number" /></div>
-              <div className="form-group"><label className="form-label">Bank</label><select className="form-select"><option>Select Bank</option><option>Access Bank</option><option>GTBank</option><option>Zenith Bank</option><option>First Bank</option><option>UBA</option></select></div>
-              <div className="form-group"><label className="form-label">Amount (N)</label><input className="form-input" placeholder="Enter amount" type="number" /></div>
-              <div className="form-group"><label className="form-label">Narration</label><input className="form-input" placeholder="Optional note" /></div>
-              <button className="btn btn-primary">Confirm Transfer</button>
-            </div>
-          </div>
-        </div>
-      )}
+
+      {/* Statement Modal */}
       {showStatement && (
         <div className="modal-overlay" onClick={() => setShowStatement(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><div className="modal-title">Account Statement</div><button className="modal-close" onClick={() => setShowStatement(false)}>X</button></div>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Account Statement</div>
+              <button className="modal-close" onClick={() => setShowStatement(false)}>X</button>
+            </div>
             <div className="modal-body">
-              <div className="form-group"><label className="form-label">From Date</label><input className="form-input" type="date" /></div>
-              <div className="form-group"><label className="form-label">To Date</label><input className="form-input" type="date" /></div>
-              <div className="form-group"><label className="form-label">Format</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  {["PDF", "Excel"].map(f => <div key={f} style={{ border: "1.5px solid #dce8eb", borderRadius: 10, padding: 14, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--navy)", fontFamily: "'Manrope',sans-serif" }}>{f}</div>)}
+              <div className="form-group">
+                <label className="form-label">From Date</label>
+                <input className="form-input" type="date" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">To Date</label>
+                <input className="form-input" type="date" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Format</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {['PDF', 'Excel'].map(f => (
+                    <div key={f} style={{ border: '1.5px solid #dce8eb', borderRadius: 10, padding: 14, textAlign: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>{f}</div>
+                  ))}
                 </div>
               </div>
               <button className="btn btn-primary">Download Statement</button>
@@ -955,88 +1472,179 @@ function ProfilePage({ userId }) {
         </div>
       )}
     </div>
-  );
+ );
 }
+function SchedulePage({ doctorId }) {
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const TIME_SLOTS = ['8:00 AM', '8:30 AM', '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM'];
 
-function DependentsPage() {
-  const [dependents, setDependents] = useState([
-    { id: generateDependentID("Spouse"), name: "Chidinma Okafor", relation: "Spouse", sex: "Female", age: 32, bloodGroup: "O+", genotype: "AA", allergies: "Penicillin", weight: "62kg", height: "165cm", initials: "CO" },
-    { id: generateDependentID("Son"), name: "Emeka Okafor Jr.", relation: "Son", sex: "Male", age: 8, bloodGroup: "O+", genotype: "AS", allergies: "None", weight: "28kg", height: "125cm", initials: "EO" },
-    { id: generateDependentID("Daughter"), name: "Ada Okafor", relation: "Daughter", sex: "Female", age: 5, bloodGroup: "A+", genotype: "AA", allergies: "Peanuts", weight: "18kg", height: "105cm", initials: "AO" },
-  ]);
+  const [availability, setAvailability] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const [newDep, setNewDep] = useState({ firstName: "", lastName: "", relation: "Spouse", sex: "Male", dob: "", bloodGroup: "O+", genotype: "AA", weight: "", height: "", allergies: "" });
+  const [newSlot, setNewSlot] = useState({ day: 'Monday', start_time: '9:00 AM', end_time: '5:00 PM' });
 
-  const addDependent = () => {
-    if (!newDep.firstName) return;
-    const dep = {
-      id: generateDependentID(newDep.relation),
-      name: `${newDep.firstName} ${newDep.lastName}`,
-      relation: newDep.relation, sex: newDep.sex,
-      age: newDep.dob ? new Date().getFullYear() - new Date(newDep.dob).getFullYear() : 0,
-      bloodGroup: newDep.bloodGroup, genotype: newDep.genotype,
-      allergies: newDep.allergies || "None",
-      weight: newDep.weight ? newDep.weight + "kg" : "N/A",
-      height: newDep.height ? newDep.height + "cm" : "N/A",
-      initials: `${newDep.firstName[0] || ""}${newDep.lastName[0] || ""}`.toUpperCase(),
-    };
-    setDependents([...dependents, dep]);
-    setShowAdd(false);
-    setNewDep({ firstName: "", lastName: "", relation: "Spouse", sex: "Male", dob: "", bloodGroup: "O+", genotype: "AA", weight: "", height: "", allergies: "" });
+  useEffect(() => {
+    if (!doctorId) return;
+    fetchAvailability();
+  }, [doctorId]);
+
+  const fetchAvailability = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('doctor_availability')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .order('id');
+    setAvailability(data || []);
+    setLoading(false);
   };
+
+  const addSlot = async () => {
+    if (!doctorId) {
+      alert('Doctor ID is missing. Please log out and log back in.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase
+      .from('doctor_availability')
+      .insert({ doctor_id: doctorId, ...newSlot, is_active: true })
+      .select()
+      .single();
+    if (error) {
+      alert('Error saving slot: ' + error.message);
+      console.error('Slot save error:', error);
+    } else {
+      setAvailability([...availability, data]);
+      setShowAdd(false);
+      setSuccess('Schedule updated successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    }
+    setSaving(false);
+  };
+
+  const toggleSlot = async (slot) => {
+    const updated = !slot.is_active;
+    await supabase.from('doctor_availability').update({ is_active: updated }).eq('id', slot.id);
+    setAvailability(availability.map(s => s.id === slot.id ? { ...s, is_active: updated } : s));
+  };
+
+  const deleteSlot = async (id) => {
+    await supabase.from('doctor_availability').delete().eq('id', id);
+    setAvailability(availability.filter(s => s.id !== id));
+  };
+
+  const groupedByDay = DAYS.reduce((acc, day) => {
+    acc[day] = availability.filter(s => s.day === day);
+    return acc;
+  }, {});
 
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Dependents</div><div className="page-sub">{dependents.length} family member{dependents.length !== 1 ? "s" : ""} on your plan</div></div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add Dependent</button>
-      </div>
-      <div className="dependents-grid">
-        {dependents.map(dep => (
-          <div key={dep.id} className="dependent-card">
-            <div className="dependent-avatar">{dep.initials}</div>
-            <div className="dependent-name">{dep.name}</div>
-            <div className="dependent-id">{dep.id}</div>
-            <span className="badge badge-info" style={{ marginTop: 5 }}>{dep.relation}</span>
-            <div className="dependent-meta">
-              {[{ label: "Age", value: dep.age + " yrs" }, { label: "Sex", value: dep.sex }, { label: "Blood Group", value: dep.bloodGroup }, { label: "Genotype", value: dep.genotype }, { label: "Weight", value: dep.weight }, { label: "Height", value: dep.height }].map(m => (
-                <div key={m.label}><div className="dependent-meta-label">{m.label}</div><div className="dependent-meta-value">{m.value}</div></div>
-              ))}
-            </div>
-            {dep.allergies !== "None" && <div style={{ marginTop: 8, padding: "5px 9px", background: "#fee2e2", borderRadius: 7, fontSize: 11, color: "var(--danger)", fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>Allergy: {dep.allergies}</div>}
-            <div style={{ display: "flex", gap: 7, marginTop: 14 }}>
-              <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>Edit</button>
-              <button className="btn btn-sm" style={{ background: "var(--primary-pale)", color: "var(--primary)", flex: 1, border: "none" }}>Book</button>
-            </div>
-          </div>
-        ))}
-        <div style={{ border: "2px dashed #b0cccf", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", minHeight: 180 }} onClick={() => setShowAdd(true)}>
-          <div style={{ width: 44, height: 44, borderRadius: 11, background: "var(--primary-pale)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 22, color: "var(--primary)", marginBottom: 10 }}>+</div>
-          <div style={{ fontWeight: 700, color: "var(--navy)", fontFamily: "'Montserrat',sans-serif", fontSize: 14 }}>Add Dependent</div>
-          <div style={{ fontSize: 12, color: "var(--slate)", marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>No limit on dependents</div>
+        <div>
+          <div className="page-title">My Schedule</div>
+          <div className="page-sub">Set your available days and time slots</div>
         </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
+          + Add Time Slot
+        </button>
       </div>
+
+      {success && (
+        <div style={{ background: '#dcfce7', border: '1.5px solid var(--success)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#166634', fontFamily: "'Manrope',sans-serif" }}>
+          {success}
+        </div>
+      )}
+
+      <div style={{ background: '#e8f6f9', border: '1.5px solid #98B7B9', borderRadius: 12, padding: '14px 18px', marginBottom: 24, fontSize: 13, color: '#1a2f42', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+        <strong>How it works:</strong> Add time slots for each day you are available. Patients will only be able to book appointments within these slots. Toggle a slot off to temporarily disable it without deleting it.
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Loading schedule...</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {DAYS.map(day => (
+            <div key={day} className="card">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: groupedByDay[day].length > 0 ? 14 : 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>{day}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {groupedByDay[day].length === 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>No slots added</span>
+                  )}
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ width: 'auto', fontSize: 11 }}
+                    onClick={() => { setNewSlot({ ...newSlot, day }); setShowAdd(true); }}
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+              {groupedByDay[day].length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {groupedByDay[day].map(slot => (
+                    <div key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, background: slot.is_active ? 'var(--primary-pale)' : '#f1f5f9', border: `1.5px solid ${slot.is_active ? 'var(--primary)' : '#dce8eb'}` }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: slot.is_active ? 'var(--primary-dark)' : 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+                        {slot.start_time} — {slot.end_time}
+                      </span>
+                      <div
+                        className={'toggle' + (slot.is_active ? '' : ' off')}
+                        style={{ width: 32, height: 18 }}
+                        onClick={() => toggleSlot(slot)}
+                      >
+                        <div className="toggle-thumb" style={{ width: 14, height: 14 }} />
+                      </div>
+                      <button
+                        onClick={() => deleteSlot(slot.id)}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: 'none', background: '#fee2e2', color: 'var(--danger)', cursor: 'pointer', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {showAdd && (
         <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><div className="modal-title">Add New Dependent</div><button className="modal-close" onClick={() => setShowAdd(false)}>X</button></div>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Add Time Slot</div>
+              <button className="modal-close" onClick={() => setShowAdd(false)}>X</button>
+            </div>
             <div className="modal-body">
-              <div className="form-grid-2">
-                <div className="form-group"><label className="form-label">First Name</label><input className="form-input" placeholder="First name" value={newDep.firstName} onChange={e => setNewDep({ ...newDep, firstName: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Last Name</label><input className="form-input" placeholder="Last name" value={newDep.lastName} onChange={e => setNewDep({ ...newDep, lastName: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Relationship</label><select className="form-select" value={newDep.relation} onChange={e => setNewDep({ ...newDep, relation: e.target.value })}><option>Spouse</option><option>Son</option><option>Daughter</option><option>Parent</option><option>Sibling</option><option>Other</option></select></div>
-                <div className="form-group"><label className="form-label">Sex</label><select className="form-select" value={newDep.sex} onChange={e => setNewDep({ ...newDep, sex: e.target.value })}><option>Male</option><option>Female</option></select></div>
-                <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" value={newDep.dob} onChange={e => setNewDep({ ...newDep, dob: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Blood Group</label><select className="form-select" value={newDep.bloodGroup} onChange={e => setNewDep({ ...newDep, bloodGroup: e.target.value })}>{["A+","A-","B+","B-","O+","O-","AB+","AB-"].map(b => <option key={b}>{b}</option>)}</select></div>
-                <div className="form-group"><label className="form-label">Genotype</label><select className="form-select" value={newDep.genotype} onChange={e => setNewDep({ ...newDep, genotype: e.target.value })}>{["AA","AS","SS","AC","SC"].map(g => <option key={g}>{g}</option>)}</select></div>
-                <div className="form-group"><label className="form-label">Height (cm)</label><input className="form-input" placeholder="e.g. 170" value={newDep.height} onChange={e => setNewDep({ ...newDep, height: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Weight (kg)</label><input className="form-input" placeholder="e.g. 65" value={newDep.weight} onChange={e => setNewDep({ ...newDep, weight: e.target.value })} /></div>
-                <div className="form-group" style={{ gridColumn: "1/-1" }}><label className="form-label">Known Allergies</label><input className="form-input" placeholder="e.g. Penicillin or None" value={newDep.allergies} onChange={e => setNewDep({ ...newDep, allergies: e.target.value })} /></div>
+              <div className="form-group">
+                <label className="form-label">Day</label>
+                <select className="form-select" value={newSlot.day} onChange={e => setNewSlot({ ...newSlot, day: e.target.value })}>
+                  {DAYS.map(d => <option key={d}>{d}</option>)}
+                </select>
               </div>
-              <div style={{ background: "var(--primary-pale)", borderRadius: 10, padding: 12, marginBottom: 18, fontSize: 12, color: "var(--primary-dark)", fontFamily: "'Manrope',sans-serif" }}>A unique Dependent ID will be auto-generated and linked to your account.</div>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Start Time</label>
+                  <select className="form-select" value={newSlot.start_time} onChange={e => setNewSlot({ ...newSlot, start_time: e.target.value })}>
+                    {TIME_SLOTS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">End Time</label>
+                  <select className="form-select" value={newSlot.end_time} onChange={e => setNewSlot({ ...newSlot, end_time: e.target.value })}>
+                    {TIME_SLOTS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowAdd(false)}>Cancel</button>
-                <button className="btn btn-primary" style={{ flex: 2 }} onClick={addDependent}>Add Dependent</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={addSlot} disabled={saving}>
+                  {saving ? 'Saving...' : 'Add Slot'}
+                </button>
               </div>
             </div>
           </div>
@@ -1046,228 +1654,2478 @@ function DependentsPage() {
   );
 }
 
-function TelemedicinePage() {
-  const [filter, setFilter] = useState("all");
-  const [selectedDoctor, setSelectedDoctor] = useState(null);
-  const [selectedTime, setSelectedTime] = useState(null);
-  const [scheduleStep, setScheduleStep] = useState(1);
-  const filtered = filter === "all" ? DOCTORS : DOCTORS.filter(d => d.status === filter);
-  const timeSlots = ["8:00 AM","8:30 AM","9:00 AM","9:30 AM","10:00 AM","10:30 AM","11:00 AM","11:30 AM","2:00 PM","2:30 PM","3:00 PM","3:30 PM"];
+function ConsultationNotesPage({ doctorId }) {
+  const [appointments, setAppointments] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [note, setNote] = useState({ diagnosis: '', notes: '', follow_up: '', prescription: '' });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    if (!doctorId) return;
+    fetchAppointments();
+  }, [doctorId]);
+
+  const fetchAppointments = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .order('date', { ascending: false });
+    setAppointments(data || []);
+    setLoading(false);
+  };
+
+  const selectAppointment = async (appt) => {
+    setSelected(appt);
+    const { data } = await supabase
+      .from('consultation_notes')
+      .select('*')
+      .eq('appointment_id', appt.id)
+      .single();
+    if (data) {
+      setNote({ diagnosis: data.diagnosis || '', notes: data.notes || '', follow_up: data.follow_up || '', prescription: data.prescription || '' });
+    } else {
+      setNote({ diagnosis: '', notes: '', follow_up: '', prescription: '' });
+    }
+  };
+
+  const saveNote = async () => {
+    if (!selected) return;
+    setSaving(true);
+    const { data: existing } = await supabase
+      .from('consultation_notes')
+      .select('id')
+      .eq('appointment_id', selected.id)
+      .single();
+
+    if (existing) {
+      await supabase.from('consultation_notes').update({
+        ...note, updated_at: new Date().toISOString()
+      }).eq('id', existing.id);
+    } else {
+      await supabase.from('consultation_notes').insert({
+        appointment_id: selected.id,
+        doctor_id: doctorId,
+        patient_id: selected.patient_id,
+        ...note,
+      });
+    }
+    setSaving(false);
+    setSuccess('Notes saved successfully');
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">Telemedicine</div><div className="page-sub">Consult with qualified doctors from anywhere</div></div>
-        <div style={{ display: "flex", gap: 7 }}>
-          {["all","online","busy"].map(f => <button key={f} className={"btn btn-sm " + (filter === f ? "btn-primary" : "btn-outline")} onClick={() => setFilter(f)}>{f === "all" ? "All Doctors" : f === "online" ? "Online Now" : "Busy"}</button>)}
+        <div>
+          <div className="page-title">Consultation Notes</div>
+          <div className="page-sub">Private notes per consultation — not visible to patients</div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 20 }}>
-        {[{ label: "Online Now", value: DOCTORS.filter(d => d.status === "online").length, color: "var(--success)" }, { label: "Avg. Wait Time", value: "Under 5 min", color: "var(--primary)" }, { label: "Specialties", value: "12+", color: "var(--warning)" }].map(s => (
-          <div key={s.label} className="card" style={{ display: "flex", alignItems: "center", gap: 14, padding: 18 }}>
-            <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 12, color: "var(--slate)", fontFamily: "'Manrope',sans-serif" }}>{s.label}</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20 }}>
+        {/* Appointments list */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #eef2f5', fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+            Consultations
           </div>
-        ))}
+          {loading ? (
+            <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+          ) : appointments.length === 0 ? (
+            <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif", textAlign: 'center' }}>
+              No consultations yet
+            </div>
+          ) : (
+            <div>
+              {appointments.map(a => (
+                <div
+                  key={a.id}
+                  onClick={() => selectAppointment(a)}
+                  style={{ padding: '12px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: selected?.id === a.id ? 'var(--primary-pale)' : 'white', borderLeft: selected?.id === a.id ? '3px solid var(--primary)' : '3px solid transparent', transition: 'all 0.2s' }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>
+                    {a.patient_name || 'Patient'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--slate)', marginTop: 2, fontFamily: "'Manrope',sans-serif" }}>
+                    {a.date ? new Date(a.date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }) : 'No date'}
+                  </div>
+                  <span className={`badge ${a.status === 'completed' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10, marginTop: 4 }}>
+                    {a.status || 'upcoming'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Notes editor */}
+        <div className="card">
+          {!selected ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+              <div style={{ fontSize: 13 }}>Select a consultation from the left to view or write notes</div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+                    {selected.patient_name || 'Patient'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+                    {selected.date ? new Date(selected.date).toLocaleDateString('en-NG', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}
+                  </div>
+                </div>
+                {success && (
+                  <div style={{ background: '#dcfce7', color: '#166634', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontFamily: "'Manrope',sans-serif" }}>
+                    {success}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ background: '#fef9c3', border: '1.5px solid #e8a444', borderRadius: 10, padding: '10px 14px', marginBottom: 20, fontSize: 12, color: '#854d0e', fontFamily: "'Manrope',sans-serif" }}>
+                These notes are private and confidential. They are not visible to the patient.
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Diagnosis</label>
+                <input
+                  className="form-input"
+                  placeholder="Primary diagnosis..."
+                  value={note.diagnosis}
+                  onChange={e => setNote({ ...note, diagnosis: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Consultation Notes</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="Detailed notes about the consultation, symptoms, observations..."
+                  value={note.notes}
+                  onChange={e => setNote({ ...note, notes: e.target.value })}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Prescription</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="Medications prescribed, dosage and duration..."
+                  value={note.prescription}
+                  onChange={e => setNote({ ...note, prescription: e.target.value })}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Follow-up Instructions</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="Next steps, follow-up date, lifestyle recommendations..."
+                  value={note.follow_up}
+                  onChange={e => setNote({ ...note, follow_up: e.target.value })}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+
+              <button className="btn btn-primary" onClick={saveNote} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Notes'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      <div className="doctors-grid">
-        {filtered.map(doc => (
-          <div key={doc.id} className="doctor-card">
-            <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-              <div className="doctor-avatar">{doc.initials}</div>
-              <div>
-                <div className="doctor-name">{doc.name}</div>
-                <div className="doctor-specialty">{doc.specialty}</div>
-                <div className="doctor-rating">Rating: {doc.rating} ({doc.consultations} consults)</div>
+    </div>
+  );
+}
+function DoctorProfilePage({ profile, setProfile }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
+  const [photo, setPhoto] = useState(profile?.avatar_url || null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const fileRef = useRef();
+  const [form, setForm] = useState({
+    full_name: profile?.full_name || '',
+    phone: profile?.phone || '',
+    specialty: profile?.specialty || '',
+    experience_years: profile?.experience_years || '',
+    bio: profile?.bio || '',
+  });
+
+  const SPECIALTIES = [
+    "General Practitioner", "Cardiologist", "Pediatrician", "Dermatologist",
+    "Gynecologist", "Dentist", "Orthopedist", "Neurologist", "Psychiatrist",
+    "Ophthalmologist", "ENT Specialist", "Urologist", "Oncologist", "Other"
+  ];
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${profile.id}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('doctor-avatars')
+        .upload(path, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage
+        .from('doctor-avatars')
+        .getPublicUrl(path);
+      const url = urlData.publicUrl;
+      await supabase.from('doctors').update({ avatar_url: url }).eq('id', profile.id);
+      setPhoto(url);
+      setProfile({ ...profile, avatar_url: url });
+      setSuccess('Profile photo updated successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Photo upload failed: ' + e.message);
+    }
+    setUploadingPhoto(false);
+  };
+
+  const handleSave = async () => {
+    if (!profile?.id) return;
+    setSaving(true);
+    setError('');
+    try {
+      const { error: updateError } = await supabase
+        .from('doctors')
+        .update({
+          full_name: form.full_name,
+          phone: form.phone,
+          specialty: form.specialty,
+          experience_years: parseInt(form.experience_years) || 0,
+          bio: form.bio,
+        })
+        .eq('id', profile.id);
+      if (updateError) throw updateError;
+      setProfile({ ...profile, ...form });
+      setEditing(false);
+      setSuccess('Profile updated successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Save failed: ' + e.message);
+    }
+    setSaving(false);
+  };
+
+  const initials = form.full_name
+    ? form.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : 'DR';
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">My Profile</div>
+          <div className="page-sub">Your doctor profile visible to patients</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {editing ? (
+            <>
+              <button className="btn btn-outline btn-sm" onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-primary btn-sm" onClick={() => setEditing(true)}>Edit Profile</button>
+          )}
+        </div>
+      </div>
+
+      {success && (
+        <div style={{ background: '#dcfce7', border: '1.5px solid var(--success)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#166634', fontFamily: "'Manrope',sans-serif" }}>
+          {success}
+        </div>
+      )}
+      {error && (
+        <div style={{ background: '#fee2e2', border: '1.5px solid var(--danger)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#991b1b', fontFamily: "'Manrope',sans-serif" }}>
+          {error}
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+          {/* Photo */}
+          <div style={{ flexShrink: 0 }}>
+            <div
+              style={{ width: 100, height: 100, borderRadius: 20, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", overflow: 'hidden', position: 'relative', cursor: editing ? 'pointer' : 'default' }}
+              onClick={() => editing && fileRef.current.click()}
+            >
+              {photo ? <img src={photo} alt="profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+              {editing && (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>
+                  {uploadingPhoto ? 'Uploading...' : 'Change'}
+                </div>
+              )}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+            {editing && (
+              <div style={{ fontSize: 11, color: 'var(--slate)', textAlign: 'center', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>
+                Click to upload
+              </div>
+            )}
+          </div>
+
+          {/* Basic info */}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+              {form.full_name}
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
+              {form.specialty}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <span className={'badge ' + (profile?.status === 'approved' ? 'badge-success' : 'badge-warning')}>
+                {profile?.status === 'approved' ? 'Approved' : 'Pending Approval'}
+              </span>
+              <span className="badge badge-info">{form.experience_years} years experience</span>
+              <span className="badge badge-info">N1,000 per consultation</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 18 }}>Personal Information</div>
+          <div className="form-group">
+            <label className="form-label">Full Name</label>
+            <input
+              className="form-input"
+              value={form.full_name}
+              disabled={!editing}
+              onChange={e => setForm({ ...form, full_name: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Phone Number</label>
+            <input
+              className="form-input"
+              value={form.phone}
+              disabled={!editing}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Email</label>
+            <input
+              className="form-input"
+              value={profile?.email || ''}
+              disabled
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Specialty</label>
+            {editing ? (
+              <select
+                className="form-select"
+                value={form.specialty}
+                onChange={e => setForm({ ...form, specialty: e.target.value })}
+              >
+                {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            ) : (
+              <input className="form-input" value={form.specialty} disabled />
+            )}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Years of Experience</label>
+            <input
+              className="form-input"
+              type="number"
+              value={form.experience_years}
+              disabled={!editing}
+              onChange={e => setForm({ ...form, experience_years: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 18 }}>About & Bio</div>
+          <div className="form-group">
+            <label className="form-label">Professional Bio</label>
+            <textarea
+              className="form-input"
+              rows={10}
+              style={{ resize: 'vertical', minHeight: 200 }}
+              value={form.bio}
+              disabled={!editing}
+              onChange={e => setForm({ ...form, bio: e.target.value })}
+              placeholder="Describe your expertise, experience and approach to patient care..."
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Consultation Fee</label>
+            <input className="form-input" value="N1,000 (Flat Rate — set by platform)" disabled />
+          </div>
+          <div style={{ background: 'var(--primary-pale)', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: 'var(--primary-dark)', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+            Your profile is visible to all patients on the platform. Keep your bio professional and up to date.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DoctorMessagesPage({ doctorUserId, doctorName }) {
+  const [patients, setPatients] = useState([]);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const messagesEndRef = useRef();
+  const chatFileRef = useRef();
+  const [selectedChatFile, setSelectedChatFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+
+  useEffect(() => {
+    if (!doctorUserId) return;
+    fetchPatients();
+  }, [doctorUserId]);
+
+  useEffect(() => {
+    if (!selectedPatient) return;
+    fetchMessages();
+
+    const subscription = supabase
+      .channel('doctor-messages')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, (payload) => {
+        const msg = payload.new;
+        if (
+          (msg.sender_id === doctorUserId && msg.receiver_id === selectedPatient.user_id) ||
+          (msg.sender_id === selectedPatient.user_id && msg.receiver_id === doctorUserId)
+        ) {
+          setMessages(prev => [...prev, msg]);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(subscription);
+  }, [selectedPatient]);
+
+  useEffect(() => {
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  }, [messages]);
+
+  const fetchPatients = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('messages')
+      .select('sender_id, sender_name')
+      .eq('receiver_id', doctorUserId);
+    
+    const unique = [];
+    const seen = new Set();
+    (data || []).forEach(m => {
+      if (!seen.has(m.sender_id)) {
+        seen.add(m.sender_id);
+        unique.push({ user_id: m.sender_id, full_name: m.sender_name });
+      }
+    });
+    setPatients(unique);
+    setLoading(false);
+  };
+
+  const fetchMessages = async () => {
+    if (!selectedPatient || !doctorUserId) return;
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${doctorUserId},receiver_id.eq.${selectedPatient.user_id}),and(sender_id.eq.${selectedPatient.user_id},receiver_id.eq.${doctorUserId})`)
+      .order('created_at');
+    setMessages(data || []);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !selectedPatient || !doctorUserId) return;
+    setSending(true);
+    const { data, error } = await supabase.from('messages').insert({
+      sender_id: doctorUserId,
+      receiver_id: selectedPatient.user_id,
+      sender_name: doctorName,
+      content: newMessage.trim(),
+    }).select().single();
+    if (!error && data) {
+      setMessages(prev => [...prev, data]);
+      setNewMessage('');
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+    setSending(false);
+  };
+
+  const getInitials = (name) => name ? name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?';
+
+  const formatMsgTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Lagos' });
+    }
+    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', timeZone: 'Africa/Lagos' });
+  };
+
+  return (
+    <div style={{ height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Messages</div>
+          <div className="page-sub">Chat with your patients</div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20, overflow: 'hidden' }}>
+        {/* Patients list */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #eef2f5', fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+            Patients
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+            ) : patients.length === 0 ? (
+              <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, textAlign: 'center', fontFamily: "'Manrope',sans-serif" }}>
+                No messages yet
+              </div>
+            ) : (
+              patients.map(p => (
+                <div
+                  key={p.user_id}
+                  onClick={() => setSelectedPatient(p)}
+                  style={{ padding: '12px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: selectedPatient?.user_id === p.user_id ? 'var(--primary-pale)' : 'white', borderLeft: selectedPatient?.user_id === p.user_id ? '3px solid var(--primary)' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: 12 }}
+                >
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>
+                    {getInitials(p.full_name)}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>{p.full_name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Patient</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Chat area */}
+        <div className="card" style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!selectedPatient ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", fontSize: 13 }}>
+              Select a patient to view messages
+            </div>
+          ) : (
+            <>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #eef2f5', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>
+                  {getInitials(selectedPatient.full_name)}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>{selectedPatient.full_name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Patient</div>
+                </div>
+              </div>
+
+              <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {messages.length === 0 && (
+                  <div style={{ textAlign: 'center', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif", marginTop: 40 }}>
+                    No messages yet
+                  </div>
+                )}
+                {messages.map((msg, i) => {
+                  const isMe = msg.sender_id === doctorUserId;
+                  return (
+                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ maxWidth: '70%', padding: '10px 14px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'var(--primary)' : '#f1f5f9', color: isMe ? 'white' : 'var(--navy)', fontSize: 13, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6 }}>
+                        {msg.content}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
+                        {formatMsgTime(msg.created_at)}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div style={{ padding: '14px 20px', borderTop: '1px solid #eef2f5' }}>
+                {filePreview && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--primary-pale)', borderRadius: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>
+                      {filePreview.type.includes('pdf') ? 'PDF' : 'IMG'}
+                    </div>
+                    <div style={{ flex: 1, fontSize: 12, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {filePreview.name}
+                    </div>
+                    <button onClick={() => { setFilePreview(null); setSelectedChatFile(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--slate)', fontSize: 14 }}>✕</button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={() => chatFileRef.current.click()}
+                    style={{ width: 40, height: 40, borderRadius: 10, background: '#f1f5f9', border: 'none', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                    title="Attach file"
+                  >
+                    📎
+                  </button>
+                  <input
+                    ref={chatFileRef}
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.pdf"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const file = e.target.files[0];
+                      if (file) { setSelectedChatFile(file); setFilePreview(file); }
+                    }}
+                  />
+                  <input
+                    className="form-input"
+                    style={{ flex: 1, marginBottom: 0 }}
+                    placeholder={`Message ${selectedDoctor.full_name}...`}
+                    value={newMessage}
+                    onChange={e => setNewMessage(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: 'auto', padding: '0 20px', flexShrink: 0 }}
+                    onClick={sendMessage}
+                    disabled={sending || (!newMessage.trim() && !selectedChatFile)}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function DoctorDashboard({ doctorProfile, doctorUser, onLogout }) {
+  const [profile, setProfile] = useState(doctorProfile);
+console.log('doctorProfile received:', doctorProfile);
+  useEffect(() => {
+    if (!doctorProfile?.id && doctorProfile?.user_id) {
+      supabase.from('doctors').select('*').eq('user_id', doctorProfile.user_id).single().then(({ data }) => {
+        if (data) setProfile(data);
+      });
+    }
+  }, [doctorProfile]);
+  const [isAvailable, setIsAvailable] = useState(doctorProfile?.is_available || false);
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [doctorCallActive, setDoctorCallActive] = useState(false);
+  const [doctorCallClient, setDoctorCallClient] = useState(null);
+  const [doctorLocalTrack, setDoctorLocalTrack] = useState(null);
+  const doctorLocalRef = useRef();
+  const doctorRemoteRef = useRef();
+  const joinCall = async (appointment) => {
+    const AGORA_APP_ID = '5e972a5ba048430980f63dd3a549880b';
+    const token = '007eJxTYHjNL145ucAoNS0iPUHjo/Zm7Wrr3IxrHfK+citKPyXksikwmKZamhslmiYlGphYmBgbWFoYpJkZp6QYJ5qaWFpYGCQtXbUosyGQkaF8+SxmRgYIBPG5GUpSi0uSMxLz8lJzGBgAUu0f+g==';
+    try {
+      const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+      const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+      setDoctorCallClient(client);
+      await client.join(AGORA_APP_ID, appointment.agora_channel, token, null);
+      const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+      setDoctorLocalTrack([micTrack, camTrack]);
+      await client.publish([micTrack, camTrack]);
+      setDoctorCallActive(true);
+      camTrack.play(doctorLocalRef.current);
+      client.on('user-published', async (user, mediaType) => {
+        await client.subscribe(user, mediaType);
+        if (mediaType === 'video') user.videoTrack?.play(doctorRemoteRef.current);
+        if (mediaType === 'audio') user.audioTrack?.play();
+      });
+    } catch (e) {
+      alert('Error joining call: ' + e.message);
+    }
+  };
+
+  const endDoctorCall = async () => {
+    if (doctorLocalTrack) {
+      (Array.isArray(doctorLocalTrack) ? doctorLocalTrack : [doctorLocalTrack]).forEach(t => { t.stop(); t.close(); });
+    }
+    if (doctorCallClient) await doctorCallClient.leave();
+    setDoctorCallActive(false);
+    setDoctorCallClient(null);
+    setDoctorLocalTrack(null);
+  };
+  const [activePage, setActivePage] = useState('overview');
+
+  useEffect(() => {
+    fetchAppointments();
+  }, []);
+
+  const fetchAppointments = async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('doctor_id', profile.id)
+        .order('date', { ascending: true });
+      setAppointments(data || []);
+    } catch(e) {
+      console.error('Appointments fetch error:', e.message);
+    }
+    setLoading(false);
+  };
+
+  const toggleAvailability = async () => {
+    const newVal = !isAvailable;
+    setIsAvailable(newVal);
+    await supabase
+      .from('doctors')
+      .update({ is_available: newVal })
+      .eq('id', profile.id);
+  };
+
+  const initials = profile?.full_name
+    ? profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : 'DR';
+
+  const todayStr = new Date().toLocaleDateString('en-NG', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  const upcomingCount = appointments.filter(a => a.status === 'upcoming').length;
+  const completedCount = appointments.filter(a => a.status === 'completed').length;
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {/* Sidebar */}
+      <div className="sidebar">
+        <div className="sidebar-logo">
+          <img
+            src="/assets/logo.png"
+            alt="Span Healthcare"
+            className="sidebar-logo-img"
+            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+          />
+          <div className="sidebar-logo-icon" style={{ display: 'none' }}>SPAN</div>
+          <div>
+            <div className="sidebar-logo-name">Span Healthcare</div>
+            <div className="sidebar-logo-tag">Doctor Portal</div>
+          </div>
+        </div>
+
+        <div className="sidebar-nav">
+          {[
+            { id: 'overview', label: 'Overview', short: 'OV' },
+            { id: 'appointments', label: 'Appointments', short: 'AP' },
+            { id: 'messages', label: 'Messages', short: 'MSG' },
+            { id: 'schedule', label: 'My Schedule', short: 'SC' },
+            { id: 'notes', label: 'Consultation Notes', short: 'CN' },
+            { id: 'profile', label: 'My Profile', short: 'PR' },
+          ].map(item => (
+            <div
+              key={item.id}
+              className={'nav-item' + (activePage === item.id ? ' active' : '')}
+              onClick={() => setActivePage(item.id)}
+            >
+              <div className="nav-icon">{item.short}</div>
+              {item.label}
+            </div>
+          ))}
+        </div>
+
+        <div className="sidebar-footer">
+          {/* Availability toggle */}
+          <div style={{ padding: '10px 8px', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: "'Manrope',sans-serif", marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Availability
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, color: isAvailable ? 'var(--success)' : 'rgba(255,255,255,0.4)', fontFamily: "'Manrope',sans-serif", fontWeight: 600 }}>
+                {isAvailable ? 'Available' : 'Unavailable'}
+              </span>
+              <div
+                className={'toggle' + (isAvailable ? '' : ' off')}
+                onClick={toggleAvailability}
+              >
+                <div className="toggle-thumb" />
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 8, fontSize: 12, fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>
-              <span className={"status-dot " + doc.status} />
-              <span style={{ color: doc.status === "online" ? "var(--success)" : doc.status === "busy" ? "var(--warning)" : "var(--slate-light)", textTransform: "capitalize" }}>{doc.status}</span>
-              <span style={{ marginLeft: "auto", color: "var(--slate)", fontSize: 11 }}>Exp: {doc.experience}</span>
-            </div>
-            <div className="doctor-tags">{doc.tags.map(t => <span key={t} className="doctor-tag">{t}</span>)}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: "var(--navy)" }}>N{doc.price.toLocaleString()}</span>
-              <span style={{ fontSize: 11, color: "var(--slate)", fontFamily: "'Manrope',sans-serif" }}>per session</span>
-            </div>
-            <div className="doctor-call-actions">
-              <button className="call-btn call-btn-video" onClick={() => setSelectedDoctor({ ...doc, mode: "video" })}>Video</button>
-              <button className="call-btn call-btn-audio" onClick={() => setSelectedDoctor({ ...doc, mode: "audio" })}>Audio</button>
-              <button className="call-btn call-btn-chat" onClick={() => setSelectedDoctor({ ...doc, mode: "schedule" })}>Chat</button>
-            </div>
-            <button className="btn btn-outline btn-sm" style={{ width: "100%", marginTop: 7 }} onClick={() => { setSelectedDoctor({ ...doc, mode: "schedule" }); setScheduleStep(1); }}>Schedule Appointment</button>
           </div>
-        ))}
+
+          <div className="sidebar-user">
+            <div className="sidebar-avatar">{initials}</div>
+            <div>
+              <div className="sidebar-user-name">{profile?.full_name}</div>
+              <div className="sidebar-user-role">{profile?.specialty}</div>
+            </div>
+          </div>
+          <button className="logout-btn" onClick={onLogout}>
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(224,82,82,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#e05252', fontFamily: "'Montserrat',sans-serif" }}>OUT</div>
+            Log Out
+          </button>
+        </div>
       </div>
-      {selectedDoctor && (
-        <div className="modal-overlay" onClick={() => setSelectedDoctor(null)}>
+
+      {/* Main content */}
+      <div className="main-content">
+
+        {/* Overview */}
+        {activePage === 'overview' && (
+          <div>
+            <div className="topbar">
+              <div>
+                <div className="page-title">
+                  Hello, {profile?.full_name?.split(' ')[0]}!
+                </div>
+                <div className="page-sub">{todayStr}</div>
+              </div>
+              {profile?.status === 'pending' && (
+                <div style={{ background: '#fef9c3', border: '1.5px solid var(--warning)', borderRadius: 10, padding: '8px 16px', fontSize: 12, fontWeight: 600, color: '#854d0e', fontFamily: "'Manrope',sans-serif" }}>
+                  Account pending approval
+                </div>
+              )}
+            </div>
+
+            {/* Pending notice */}
+            {profile?.status === 'pending' && (
+              <div style={{ background: '#fef9c3', border: '1.5px solid var(--warning)', borderRadius: 14, padding: '18px 22px', marginBottom: 24, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#854d0e', background: '#fde68a', padding: '3px 8px', borderRadius: 6, fontFamily: "'Montserrat',sans-serif", flexShrink: 0 }}>PENDING</div>
+                <div style={{ fontSize: 13, color: '#713f12', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
+                  Your doctor profile is currently under review by Span Healthcare admin.
+                  You will receive an email once your account is approved and you can start accepting patients.
+                </div>
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="stats-grid">
+              <div className="stat-card">
+                <span className="stat-tag" style={{ background: '#e8f6f9', color: '#2d8a9e' }}>APPT</span>
+                <div className="stat-value" style={{ marginTop: 6 }}>{loading ? '—' : upcomingCount}</div>
+                <div className="stat-label">Upcoming</div>
+                <div className="stat-change up">Scheduled consultations</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-tag" style={{ background: '#dcfce7', color: '#166634' }}>DONE</span>
+                <div className="stat-value" style={{ marginTop: 6 }}>{loading ? '—' : completedCount}</div>
+                <div className="stat-label">Completed</div>
+                <div className="stat-change up">Total consultations done</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-tag" style={{ background: '#f3e8ff', color: '#6b21a8' }}>RATE</span>
+                <div className="stat-value" style={{ marginTop: 6 }}>{profile?.rating || '—'}</div>
+                <div className="stat-label">Rating</div>
+                <div className="stat-change up">From patient reviews</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-tag" style={{ background: '#fef9c3', color: '#854d0e' }}>FEE</span>
+                <div className="stat-value" style={{ marginTop: 6 }}>N1,000</div>
+                <div className="stat-label">Per Consultation</div>
+                <div className="stat-change up">Flat rate fee</div>
+              </div>
+            </div>
+
+            {/* Upcoming appointments */}
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 16 }}>Upcoming Appointments</div>
+              {loading ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+              ) : appointments.filter(a => a.status === 'upcoming').length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+                  No upcoming appointments yet.
+                </div>
+              ) : (
+                <div className="schedule-list">
+                  {appointments.filter(a => a.status === 'upcoming').map(a => (
+                    <div key={a.id} className="appt-item">
+                      <div style={{ minWidth: 60, textAlign: 'center' }}>
+                        <div className="appt-time-val" style={{ fontSize: 13 }}>
+                          {new Date(a.date).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <div className="appt-time-date">
+                          {new Date(a.date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short' })}
+                        </div>
+                      </div>
+                      <div className="appt-divider" />
+                      <div style={{ flex: 1 }}>
+                        <div className="appt-title">{a.title || 'Consultation'}</div>
+                        <div className="appt-doctor">{a.patient_name || 'Patient'}</div>
+                      </div>
+                      <span className="badge badge-info">{a.type || 'Video'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Appointments page */}
+        {activePage === 'appointments' && (
+          <div>
+            <div className="topbar">
+              <div>
+                <div className="page-title">Appointments</div>
+                <div className="page-sub">All your scheduled consultations</div>
+              </div>
+            </div>
+            <div className="tab-bar">
+              {['Upcoming', 'Completed', 'Cancelled'].map((t, i) => (
+                <button key={t} className={'tab-btn' + (i === 0 ? ' active' : '')}>{t}</button>
+              ))}
+            </div>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+            ) : appointments.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+                No appointments yet.
+              </div>
+            ) : (
+              <div className="schedule-list">
+                {appointments.map(a => (
+                  <div key={a.id} className="appt-item">
+                    <div style={{ minWidth: 60, textAlign: 'center' }}>
+                      <div className="appt-time-val" style={{ fontSize: 13 }}>
+                        {new Date(a.date).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <div className="appt-time-date">
+                        {new Date(a.date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short' })}
+                      </div>
+                    </div>
+                    <div className="appt-divider" />
+                    <div style={{ flex: 1 }}>
+                      <div className="appt-title">{a.title || 'Consultation'}</div>
+                      <div className="appt-doctor">{a.patient_name || 'Patient'}</div>
+                    </div>
+                    <span className={'badge ' + (a.status === 'completed' ? 'badge-success' : a.status === 'cancelled' ? 'badge-danger' : 'badge-info')}>
+                      {a.status || 'upcoming'}
+                    </span>
+                    {a.status === 'active' && a.agora_channel && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        style={{ marginLeft: 8 }}
+                        onClick={() => joinCall(a)}
+                      >
+                        Join Call
+                      </button>
+                    )}
+                    {(a.status === 'upcoming' || a.status === 'active') && (
+                      <button
+                        className="btn btn-sm"
+                        style={{ marginLeft: 8, background: '#dcfce7', color: '#166634', border: 'none' }}
+                        onClick={async () => {
+                          await supabase.from('appointments').update({ status: 'completed' }).eq('id', a.id);
+                          setAppointments(appointments.map(ap => ap.id === a.id ? { ...ap, status: 'completed' } : ap));
+                        }}
+                      >
+                        Mark Complete
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Messages page */}
+        {activePage === 'messages' && (
+          <DoctorMessagesPage doctorUserId={doctorUser?.id} doctorName={profile?.full_name} />
+        )}
+
+        {/* Schedule page */}
+        {activePage === 'schedule' && (
+          <SchedulePage doctorId={profile?.id} />
+        )}
+
+        {/* Consultation Notes page */}
+        {activePage === 'notes' && (
+          <ConsultationNotesPage doctorId={profile?.id} />
+        )}
+
+        {/* Profile page */}
+        {activePage === 'profile' && (
+          <DoctorProfilePage profile={profile} setProfile={setProfile} />
+        )}
+
+      </div>
+
+      {/* Doctor Active Call UI */}
+      {doctorCallActive && (
+        <div style={{ position: 'fixed', inset: 0, background: '#0f1f2e', zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '18px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>Patient Consultation</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: "'Manrope',sans-serif" }}>Video Call in Progress</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)' }} />
+              <span style={{ fontSize: 12, color: 'var(--success)', fontFamily: "'Manrope',sans-serif" }}>Connected</span>
+            </div>
+          </div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: 24 }}>
+            <div ref={doctorRemoteRef} style={{ width: '100%', maxWidth: 800, height: 450, background: '#1a2f42', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontFamily: "'Manrope',sans-serif" }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>👤</div>
+                <div>Waiting for patient...</div>
+              </div>
+            </div>
+            <div ref={doctorLocalRef} style={{ position: 'absolute', bottom: 40, right: 40, width: 160, height: 120, background: '#0f1f2e', borderRadius: 12, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }} />
+          </div>
+          <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'center', gap: 16, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+            <button
+              onClick={endDoctorCall}
+              style={{ padding: '14px 32px', borderRadius: 50, background: 'var(--danger)', color: 'white', border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: "'Montserrat',sans-serif" }}
+            >
+              End Call
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function DependentsPage({ userId }) {
+  const [dependents, setDependents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [newDep, setNewDep] = useState({
+    full_name: '', relation: 'Spouse', sex: 'Male',
+    date_of_birth: '', blood_group: 'O+', genotype: 'AA',
+    weight: '', height: '', allergies: ''
+  });
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchDependents();
+  }, [userId]);
+
+  const fetchDependents = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('dependents')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at');
+    setDependents(data || []);
+    setLoading(false);
+  };
+
+  const getAge = (dob) => {
+    if (!dob) return 'N/A';
+    return new Date().getFullYear() - new Date(dob).getFullYear();
+  };
+
+  const getInitials = (name) => {
+    if (!name) return '?';
+    return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  };
+
+  const addDependent = async () => {
+    if (!newDep.full_name) return;
+    setSaving(true);
+    const { data, error } = await supabase
+      .from('dependents')
+      .insert({
+        user_id: userId,
+        full_name: newDep.full_name,
+        relation: newDep.relation,
+        sex: newDep.sex,
+        date_of_birth: newDep.date_of_birth || null,
+        blood_group: newDep.blood_group,
+        genotype: newDep.genotype,
+        weight: newDep.weight,
+        height: newDep.height,
+        allergies: newDep.allergies || 'None',
+      })
+      .select()
+      .single();
+    if (!error) {
+      setDependents([...dependents, data]);
+      setShowAdd(false);
+      setNewDep({ full_name: '', relation: 'Spouse', sex: 'Male', date_of_birth: '', blood_group: 'O+', genotype: 'AA', weight: '', height: '', allergies: '' });
+    } else {
+      alert('Error adding dependent: ' + error.message);
+    }
+    setSaving(false);
+  };
+
+  const deleteDependent = async (id) => {
+    if (!window.confirm('Remove this dependent?')) return;
+    await supabase.from('dependents').delete().eq('id', id);
+    setDependents(dependents.filter(d => d.id !== id));
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Dependents</div>
+          <div className="page-sub">{dependents.length} family member{dependents.length !== 1 ? 's' : ''} on your plan</div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add Dependent</button>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+      ) : (
+        <div className="dependents-grid">
+          {dependents.map(dep => (
+            <div key={dep.id} className="dependent-card">
+              <div className="dependent-avatar">{getInitials(dep.full_name)}</div>
+              <div className="dependent-name">{dep.full_name}</div>
+              <div className="dependent-id">{dep.dependent_id || dep.id?.slice(0, 8).toUpperCase()}</div>
+              <span className="badge badge-info" style={{ marginTop: 5 }}>{dep.relation}</span>
+              <div className="dependent-meta">
+                {[
+                  { label: 'Age', value: getAge(dep.date_of_birth) + ' yrs' },
+                  { label: 'Sex', value: dep.sex },
+                  { label: 'Blood Group', value: dep.blood_group },
+                  { label: 'Genotype', value: dep.genotype },
+                  { label: 'Weight', value: dep.weight ? dep.weight + 'kg' : 'N/A' },
+                  { label: 'Height', value: dep.height ? dep.height + 'cm' : 'N/A' },
+                ].map(m => (
+                  <div key={m.label}>
+                    <div className="dependent-meta-label">{m.label}</div>
+                    <div className="dependent-meta-value">{m.value}</div>
+                  </div>
+                ))}
+              </div>
+              {dep.allergies && dep.allergies !== 'None' && (
+                <div style={{ marginTop: 8, padding: '5px 9px', background: '#fee2e2', borderRadius: 7, fontSize: 11, color: 'var(--danger)', fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>
+                  Allergy: {dep.allergies}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 7, marginTop: 14 }}>
+                <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>Edit</button>
+                <button
+                  className="btn btn-sm"
+                  style={{ background: '#fee2e2', color: 'var(--danger)', flex: 1, border: 'none' }}
+                  onClick={() => deleteDependent(dep.id)}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <div
+            style={{ border: '2px dashed #b0cccf', borderRadius: 16, padding: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', minHeight: 180 }}
+            onClick={() => setShowAdd(true)}
+          >
+            <div style={{ width: 44, height: 44, borderRadius: 11, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, color: 'var(--primary)', marginBottom: 10 }}>+</div>
+            <div style={{ fontWeight: 700, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif", fontSize: 14 }}>Add Dependent</div>
+            <div style={{ fontSize: 12, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>No limit on dependents</div>
+          </div>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="modal-overlay" onClick={() => setShowAdd(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-title">{selectedDoctor.mode === "video" ? "Video Call" : selectedDoctor.mode === "audio" ? "Audio Call" : "Schedule Appointment"}</div>
+              <div className="modal-title">Add New Dependent</div>
+              <button className="modal-close" onClick={() => setShowAdd(false)}>X</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid-2">
+                <div className="form-group" style={{ gridColumn: '1/-1' }}>
+                  <label className="form-label">Full Name</label>
+                  <input className="form-input" placeholder="Full name" value={newDep.full_name} onChange={e => setNewDep({ ...newDep, full_name: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Relationship</label>
+                  <select className="form-select" value={newDep.relation} onChange={e => setNewDep({ ...newDep, relation: e.target.value })}>
+                    {['Spouse', 'Son', 'Daughter', 'Parent', 'Sibling', 'Other'].map(r => <option key={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Sex</label>
+                  <select className="form-select" value={newDep.sex} onChange={e => setNewDep({ ...newDep, sex: e.target.value })}>
+                    <option>Male</option><option>Female</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date of Birth</label>
+                  <input className="form-input" type="date" value={newDep.date_of_birth} onChange={e => setNewDep({ ...newDep, date_of_birth: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Blood Group</label>
+                  <select className="form-select" value={newDep.blood_group} onChange={e => setNewDep({ ...newDep, blood_group: e.target.value })}>
+                    {['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map(b => <option key={b}>{b}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Genotype</label>
+                  <select className="form-select" value={newDep.genotype} onChange={e => setNewDep({ ...newDep, genotype: e.target.value })}>
+                    {['AA', 'AS', 'SS', 'AC', 'SC'].map(g => <option key={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Height (cm)</label>
+                  <input className="form-input" placeholder="e.g. 170" value={newDep.height} onChange={e => setNewDep({ ...newDep, height: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Weight (kg)</label>
+                  <input className="form-input" placeholder="e.g. 65" value={newDep.weight} onChange={e => setNewDep({ ...newDep, weight: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ gridColumn: '1/-1' }}>
+                  <label className="form-label">Known Allergies</label>
+                  <input className="form-input" placeholder="e.g. Penicillin or None" value={newDep.allergies} onChange={e => setNewDep({ ...newDep, allergies: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ background: 'var(--primary-pale)', borderRadius: 10, padding: 12, marginBottom: 18, fontSize: 12, color: 'var(--primary-dark)', fontFamily: "'Manrope',sans-serif" }}>
+                A unique Dependent ID will be auto-generated and linked to your account.
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowAdd(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={addDependent} disabled={saving}>
+                  {saving ? 'Adding...' : 'Add Dependent'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessagesPage({ userId, userName }) {
+  const [doctors, setDoctors] = useState([]);
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const messagesEndRef = useRef();
+
+  useEffect(() => {
+    fetchDoctors();
+  }, [userId]);
+
+  useEffect(() => {
+    if (!selectedDoctor) return;
+    fetchMessages();
+    markAsRead();
+
+    const subscription = supabase
+      .channel('messages')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, (payload) => {
+        const msg = payload.new;
+        if (
+          (msg.sender_id === userId && msg.receiver_id === selectedDoctor.user_id) ||
+          (msg.sender_id === selectedDoctor.user_id && msg.receiver_id === userId)
+        ) {
+          setMessages(prev => [...prev, msg]);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(subscription);
+  }, [selectedDoctor]);
+
+  useEffect(() => {
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  }, [messages]);
+
+  const fetchDoctors = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('doctors')
+      .select('*')
+      .eq('status', 'approved');
+    setDoctors(data || []);
+    setLoading(false);
+  };
+
+  const fetchMessages = async () => {
+    if (!selectedDoctor || !userId) return;
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${userId},receiver_id.eq.${selectedDoctor.user_id}),and(sender_id.eq.${selectedDoctor.user_id},receiver_id.eq.${userId})`)
+      .order('created_at');
+    setMessages(data || []);
+  };
+
+  const markAsRead = async () => {
+    if (!selectedDoctor || !userId) return;
+    await supabase
+      .from('messages')
+      .update({ read: true })
+      .eq('receiver_id', userId)
+      .eq('sender_id', selectedDoctor.user_id)
+      .eq('read', false);
+  };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() && !selectedChatFile || !selectedDoctor || !userId) return;
+    setSending(true);
+    try {
+      let file_url = null;
+      let file_name = null;
+      let file_type = null;
+
+      if (selectedChatFile) {
+        const ext = selectedChatFile.name.split('.').pop();
+        const path = `chat/${userId}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(path, selectedChatFile, { upsert: false });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path);
+        file_url = urlData.publicUrl;
+        file_name = selectedChatFile.name;
+        file_type = selectedChatFile.type;
+      }
+
+      const { data, error } = await supabase.from('messages').insert({
+        sender_id: userId,
+        receiver_id: selectedDoctor.user_id,
+        sender_name: userName,
+        content: newMessage.trim() || (file_name ? `Sent a file: ${file_name}` : ''),
+        file_url,
+        file_name,
+        file_type,
+      }).select().single();
+
+      if (!error && data) {
+        setMessages(prev => [...prev, data]);
+        setNewMessage('');
+        setSelectedChatFile(null);
+        setFilePreview(null);
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    } catch (e) {
+      console.error('Send error:', e);
+    }
+    setSending(false);
+  };
+
+  const getInitials = (name) => name ? name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'DR';
+
+  const formatMsgTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Lagos' });
+    }
+    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', timeZone: 'Africa/Lagos' });
+  };
+
+  return (
+    <div style={{ height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Messages</div>
+          <div className="page-sub">Chat with your doctors</div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20, overflow: 'hidden' }}>
+        {/* Doctors list */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #eef2f5', fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+            Doctors
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+            ) : doctors.length === 0 ? (
+              <div style={{ padding: 20, color: 'var(--slate)', fontSize: 13, textAlign: 'center', fontFamily: "'Manrope',sans-serif" }}>No doctors available</div>
+            ) : (
+              doctors.map(doc => (
+                <div
+                  key={doc.id}
+                  onClick={() => setSelectedDoctor(doc)}
+                  style={{ padding: '12px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: selectedDoctor?.id === doc.id ? 'var(--primary-pale)' : 'white', borderLeft: selectedDoctor?.id === doc.id ? '3px solid var(--primary)' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s' }}
+                >
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", flexShrink: 0, overflow: 'hidden' }}>
+                    {doc.avatar_url ? <img src={doc.avatar_url} alt={doc.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(doc.full_name)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.full_name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--primary)', fontFamily: "'Manrope',sans-serif" }}>{doc.specialty}</div>
+                  </div>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: doc.is_available ? 'var(--success)' : '#dce8eb', flexShrink: 0 }} />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Chat area */}
+        <div className="card" style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!selectedDoctor ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", fontSize: 13 }}>
+              Select a doctor to start messaging
+            </div>
+          ) : (
+            <>
+              {/* Chat header */}
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #eef2f5', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", overflow: 'hidden' }}>
+                  {selectedDoctor.avatar_url ? <img src={selectedDoctor.avatar_url} alt={selectedDoctor.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(selectedDoctor.full_name)}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>{selectedDoctor.full_name}</div>
+                  <div style={{ fontSize: 11, color: selectedDoctor.is_available ? 'var(--success)' : 'var(--slate)', fontFamily: "'Manrope',sans-serif", fontWeight: 600 }}>
+                    {selectedDoctor.is_available ? 'Available' : 'Unavailable'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {messages.length === 0 && (
+                  <div style={{ textAlign: 'center', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif", marginTop: 40 }}>
+                    No messages yet. Say hello to {selectedDoctor.full_name}!
+                  </div>
+                )}
+                {messages.map((msg, i) => {
+                  const isMe = msg.sender_id === userId;
+                  return (
+                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ maxWidth: '70%' }}>
+                        {msg.file_url && (
+                          <div style={{ marginBottom: msg.content ? 6 : 0 }}>
+                            {msg.file_type && msg.file_type.includes('image') ? (
+                              <img src={msg.file_url} alt={msg.file_name} style={{ maxWidth: 220, borderRadius: 10, display: 'block' }} />
+                            ) : (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: isMe ? 'rgba(255,255,255,0.2)' : '#e8f6f9', borderRadius: 10, textDecoration: 'none' }}>
+                                <span style={{ fontSize: 11, fontWeight: 800, color: isMe ? 'white' : 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>PDF</span>
+                                <span style={{ fontSize: 12, color: isMe ? 'white' : 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>{msg.file_name}</span>
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {msg.content && !msg.content.startsWith('Sent a file:') && (
+                          <div style={{ padding: '10px 14px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'var(--primary)' : '#f1f5f9', color: isMe ? 'white' : 'var(--navy)', fontSize: 13, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6 }}>
+                            {msg.content}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
+                        {formatMsgTime(msg.created_at)}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input */}
+              <div style={{ padding: '14px 20px', borderTop: '1px solid #eef2f5' }}>
+                {filePreview && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--primary-pale)', borderRadius: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>
+                      {filePreview.type.includes('pdf') ? 'PDF' : 'IMG'}
+                    </div>
+                    <div style={{ flex: 1, fontSize: 12, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {filePreview.name}
+                    </div>
+                    <button onClick={() => { setFilePreview(null); setSelectedChatFile(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--slate)', fontSize: 14 }}>✕</button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={() => chatFileRef.current.click()}
+                    style={{ width: 40, height: 40, borderRadius: 10, background: '#f1f5f9', border: 'none', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                    title="Attach file"
+                  >
+                    📎
+                  </button>
+                  <input
+                    ref={chatFileRef}
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.pdf"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const file = e.target.files[0];
+                      if (file) { setSelectedChatFile(file); setFilePreview(file); }
+                    }}
+                  />
+                  <input
+                    className="form-input"
+                    style={{ flex: 1, marginBottom: 0 }}
+                    placeholder={`Message ${selectedDoctor.full_name}...`}
+                    value={newMessage}
+                    onChange={e => setNewMessage(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: 'auto', padding: '0 20px', flexShrink: 0 }}
+                    onClick={sendMessage}
+                    disabled={sending || (!newMessage.trim() && !selectedChatFile)}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TelemedicinePage({ userId, userName }) {
+  const AGORA_APP_ID = '5e972a5ba048430980f63dd3a549880b';
+  const [doctors, setDoctors] = useState([]);
+  const [wallet, setWallet] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [bookingStep, setBookingStep] = useState(1);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [consultationType, setConsultationType] = useState('video');
+  const [reason, setReason] = useState('');
+  const [booking, setBooking] = useState(false);
+  const [bookingError, setBookingError] = useState('');
+  const [callActive, setCallActive] = useState(false);
+  const [callType, setCallType] = useState('video');
+  const [callDoctor, setCallDoctor] = useState(null);
+  const [agoraClient, setAgoraClient] = useState(null);
+  const [localTrack, setLocalTrack] = useState(null);
+  const [remoteUsers, setRemoteUsers] = useState([]);
+  const localRef = useRef();
+  const remoteRef = useRef();
+
+  useEffect(() => {
+    fetchDoctors();
+    fetchWallet();
+  }, [userId]);
+
+  const fetchDoctors = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('doctors')
+      .select('*')
+      .eq('status', 'approved');
+    setDoctors(data || []);
+    setLoading(false);
+  };
+
+  const fetchWallet = async () => {
+    if (!userId) return;
+    const { data } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    setWallet(data);
+  };
+
+  const fetchSlots = async (doctorId, day) => {
+    const { data } = await supabase
+      .from('doctor_availability')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .eq('day', day)
+      .eq('is_active', true);
+    setAvailableSlots(data || []);
+  };
+
+  const handleDateChange = (date, doctorId) => {
+    setSelectedDate(date);
+    setSelectedTime('');
+    if (date) {
+      const day = new Date(date).toLocaleDateString('en-US', { weekday: 'long' });
+      fetchSlots(doctorId, day);
+    }
+  };
+
+  const generateTimeOptions = (slots) => {
+    const times = [];
+    slots.forEach(slot => {
+      const start = slot.start_time;
+      const end = slot.end_time;
+      const toMin = t => {
+        const [time, period] = t.split(' ');
+        let [h, m] = time.split(':').map(Number);
+        if (period === 'PM' && h !== 12) h += 12;
+        if (period === 'AM' && h === 12) h = 0;
+        return h * 60 + m;
+      };
+      const toTime = m => {
+        let h = Math.floor(m / 60);
+        const min = m % 60;
+        const period = h >= 12 ? 'PM' : 'AM';
+        if (h > 12) h -= 12;
+        if (h === 0) h = 12;
+        return `${h}:${min.toString().padStart(2, '0')} ${period}`;
+      };
+      let current = toMin(start);
+      const endMin = toMin(end);
+      while (current < endMin) {
+        times.push(toTime(current));
+        current += 30;
+      }
+    });
+    return times;
+  };
+
+  const confirmBooking = async () => {
+    if (!userId || !selectedDoctor) return;
+    setBookingError('');
+
+    if (!wallet || Number(wallet.balance) < 1000) {
+      setBookingError('Insufficient balance. Please fund your wallet with at least N1,000 to book a consultation.');
+      return;
+    }
+    if (!selectedDate || !selectedTime) {
+      setBookingError('Please select a date and time.');
+      return;
+    }
+
+    setBooking(true);
+    try {
+      const channel = `consult_${userId}_${selectedDoctor.id}_${Date.now()}`;
+      const appointmentDate = new Date(`${selectedDate} ${selectedTime}`).toISOString();
+
+      const { error: apptError } = await supabase.from('appointments').insert({
+        user_id: userId,
+        patient_id: userId,
+        patient_name: userName,
+        doctor_id: selectedDoctor.id,
+        doctor_name: selectedDoctor.full_name,
+        title: `Consultation with ${selectedDoctor.full_name}`,
+        date: appointmentDate,
+        type: consultationType,
+        status: 'upcoming',
+        agora_channel: channel,
+        notes: reason,
+      });
+      if (apptError) throw apptError;
+
+      const { data: deductResult, error: deductError } = await supabase
+  .rpc('deduct_wallet_and_record', {
+    p_user_id: userId,
+    p_amount: 1000,
+    p_name: `Consultation fee — ${selectedDoctor.full_name}`,
+  });
+if (deductError) throw deductError;
+if (!deductResult.success) throw new Error(deductResult.error);
+
+setWallet({ ...wallet, balance: deductResult.new_balance });
+      setBooking(false);
+      setSelectedDoctor(null);
+      setBookingStep(1);
+      setSelectedDate('');
+      setSelectedTime('');
+      setReason('');
+      alert(`Booking confirmed! Your appointment with ${selectedDoctor.full_name} is scheduled for ${selectedDate} at ${selectedTime}. N1,000 has been deducted from your wallet.`);
+
+    } catch (e) {
+      setBookingError(e.message);
+      setBooking(false);
+    }
+  };
+
+  const startCall = async (doctor, type) => {
+    if (!wallet || Number(wallet.balance) < 1000) {
+      alert('Insufficient balance. Please fund your wallet with at least N1,000 to start a consultation.');
+      return;
+    }
+
+    setCallDoctor(doctor);
+    setCallType(type);
+    setCallActive(true);
+
+    try {
+      const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+      const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+      setAgoraClient(client);
+
+      const channel = 'testchannel';
+const token = '007eJxTYHjNL145ucAoNS0iPUHjo/Zm7Wrr3IxrHfK+citKPyXksikwmKZamhslmiYlGphYmBgbWFoYpJkZp6QYJ5qaWFpYGCQtXbUosyGQkaF8+SxmRgYIBPG5GUpSi0uSMxLz8lJzGBgAUu0f+g==';
+
+// Save active call to Supabase so doctor can join
+await supabase.from('appointments').insert({
+  user_id: userId,
+  patient_id: userId,
+  patient_name: userName,
+  doctor_id: doctor.id,
+  doctor_name: doctor.full_name,
+  title: `${type === 'video' ? 'Video' : 'Audio'} Call`,
+  date: new Date().toISOString(),
+  type: type,
+  status: 'active',
+  agora_channel: channel,
+});
+
+await client.join(AGORA_APP_ID, channel, token, userId);
+
+      if (type === 'video') {
+        const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+        setLocalTrack([micTrack, camTrack]);
+        camTrack.play(localRef.current);
+        await client.publish([micTrack, camTrack]);
+      } else {
+        const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        setLocalTrack([micTrack]);
+        await client.publish([micTrack]);
+      }
+
+      client.on('user-published', async (user, mediaType) => {
+        await client.subscribe(user, mediaType);
+        if (mediaType === 'video') user.videoTrack?.play(remoteRef.current);
+        if (mediaType === 'audio') user.audioTrack?.play();
+        setRemoteUsers(prev => [...prev.filter(u => u.uid !== user.uid), user]);
+      });
+
+      client.on('user-unpublished', (user) => {
+        setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
+      });
+
+      const { data: deductResult, error: deductError } = await supabase
+  .rpc('deduct_wallet_and_record', {
+    p_user_id: userId,
+    p_amount: 1000,
+    p_name: `${type === 'video' ? 'Video' : 'Audio'} consultation — ${doctor.full_name}`,
+  });
+if (deductError) throw deductError;
+if (!deductResult.success) throw new Error(deductResult.error);
+setWallet({ ...wallet, balance: deductResult.new_balance });
+
+} catch (e) {
+  console.error('Agora error:', e);
+  alert('Call error: ' + e.message);
+  setCallActive(false);
+}
+  };
+
+  const endCall = async () => {
+    if (localTrack) {
+      (Array.isArray(localTrack) ? localTrack : [localTrack]).forEach(t => { t.stop(); t.close(); });
+    }
+    if (agoraClient) await agoraClient.leave();
+
+    // Mark appointment as completed
+    await supabase
+      .from('appointments')
+      .update({ status: 'completed' })
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    setCallActive(false);
+    setAgoraClient(null);
+    setLocalTrack(null);
+    setRemoteUsers([]);
+    setCallDoctor(null);
+  };
+
+  const filtered = filter === 'all' ? doctors : doctors.filter(d => d.is_available === (filter === 'online'));
+
+  const getInitials = (name) => name ? name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'DR';
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Telemedicine</div>
+          <div className="page-sub">Consult with qualified doctors from anywhere — N1,000 flat rate</div>
+        </div>
+        <div style={{ display: 'flex', gap: 7 }}>
+          {['all', 'online', 'offline'].map(f => (
+            <button key={f} className={'btn btn-sm ' + (filter === f ? 'btn-primary' : 'btn-outline')} onClick={() => setFilter(f)}>
+              {f === 'all' ? 'All Doctors' : f === 'online' ? 'Available' : 'Unavailable'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Wallet balance warning */}
+      {wallet && Number(wallet.balance) < 1000 && (
+        <div style={{ background: '#fee2e2', border: '1.5px solid var(--danger)', borderRadius: 12, padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#991b1b', fontFamily: "'Manrope',sans-serif" }}>
+          <strong>Low balance:</strong> Your wallet balance is insufficient for a consultation. Please fund your wallet with at least N1,000 to book or start a call.
+        </div>
+      )}
+
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 20 }}>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--success)' }}>
+            {doctors.filter(d => d.is_available).length}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Available Now</div>
+        </div>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--primary)' }}>
+            {doctors.length}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Total Doctors</div>
+        </div>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--warning)' }}>
+            N1,000
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Flat Rate Per Session</div>
+        </div>
+      </div>
+
+      {/* Doctors grid */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+          Loading doctors...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+          No doctors found.
+        </div>
+      ) : (
+        <div className="doctors-grid">
+          {filtered.map(doc => (
+            <div key={doc.id} className="doctor-card">
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <div className="doctor-avatar">
+                  {doc.avatar_url ? <img src={doc.avatar_url} alt={doc.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 14 }} /> : getInitials(doc.full_name)}
+                </div>
+                <div>
+                  <div className="doctor-name">{doc.full_name}</div>
+                  <div className="doctor-specialty">{doc.specialty}</div>
+                  <div className="doctor-rating">
+                    {doc.rating > 0 ? `Rating: ${doc.rating}` : 'New Doctor'} · {doc.experience_years} yrs exp
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, fontSize: 12, fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>
+                <span className={'status-dot ' + (doc.is_available ? 'online' : 'offline')} />
+                <span style={{ color: doc.is_available ? 'var(--success)' : 'var(--slate-light)' }}>
+                  {doc.is_available ? 'Available' : 'Unavailable'}
+                </span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--navy)' }}>N1,000</span>
+              </div>
+              {doc.bio && (
+                <div style={{ fontSize: 12, color: 'var(--slate)', marginBottom: 10, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {doc.bio}
+                </div>
+              )}
+              <div className="doctor-call-actions">
+                <button
+                  className="call-btn call-btn-video"
+                  onClick={() => startCall(doc, 'video')}
+                  disabled={!doc.is_available}
+                  style={{ opacity: doc.is_available ? 1 : 0.4 }}
+                >
+                  Video
+                </button>
+                <button
+                  className="call-btn call-btn-audio"
+                  onClick={() => startCall(doc, 'audio')}
+                  disabled={!doc.is_available}
+                  style={{ opacity: doc.is_available ? 1 : 0.4 }}
+                >
+                  Audio
+                </button>
+                <button
+                  className="call-btn call-btn-chat"
+                  onClick={() => { setSelectedDoctor(doc); setBookingStep(1); setConsultationType('chat'); }}
+                >
+                  Schedule
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Booking Modal */}
+      {selectedDoctor && (
+        <div className="modal-overlay" onClick={() => setSelectedDoctor(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Book Appointment</div>
               <button className="modal-close" onClick={() => setSelectedDoctor(null)}>X</button>
             </div>
             <div className="modal-body">
-              <div style={{ display: "flex", gap: 14, alignItems: "center", padding: 14, background: "var(--bg)", borderRadius: 12, marginBottom: 20 }}>
-                <div style={{ width: 50, height: 50, borderRadius: 12, background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, color: "white", fontFamily: "'Montserrat',sans-serif" }}>{selectedDoctor.initials}</div>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center', padding: 14, background: 'var(--bg)', borderRadius: 12, marginBottom: 20 }}>
+                <div className="doctor-avatar">{getInitials(selectedDoctor.full_name)}</div>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: "var(--navy)", fontFamily: "'Montserrat',sans-serif" }}>{selectedDoctor.name}</div>
-                  <div style={{ color: "var(--primary)", fontSize: 13, fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>{selectedDoctor.specialty}</div>
-                  <div style={{ color: "var(--slate)", fontSize: 12, marginTop: 2, fontFamily: "'Manrope',sans-serif" }}>Fee: N{selectedDoctor.price.toLocaleString()}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>{selectedDoctor.full_name}</div>
+                  <div style={{ color: 'var(--primary)', fontSize: 13, fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>{selectedDoctor.specialty}</div>
+                </div>
+                <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>N1,000</div>
+                  <div style={{ fontSize: 11, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>consultation fee</div>
                 </div>
               </div>
-              {(selectedDoctor.mode === "video" || selectedDoctor.mode === "audio") ? (
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ width: 72, height: 72, borderRadius: 18, background: "var(--primary-pale)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontWeight: 800, fontSize: 13, color: "var(--primary)", fontFamily: "'Montserrat',sans-serif" }}>{selectedDoctor.mode === "video" ? "VIDEO" : "AUDIO"}</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: "var(--navy)", marginBottom: 6, fontFamily: "'Montserrat',sans-serif" }}>Start {selectedDoctor.mode === "video" ? "Video" : "Audio"} Consultation</div>
-                  <div style={{ color: "var(--slate)", fontSize: 13, marginBottom: 20, lineHeight: 1.7, fontFamily: "'Manrope',sans-serif" }}>Your wallet will be charged N{selectedDoctor.price.toLocaleString()} upon connection.</div>
-                  <button className="btn btn-primary">Start {selectedDoctor.mode === "video" ? "Video" : "Audio"} Call</button>
-                  <button className="btn btn-outline" style={{ width: "100%", marginTop: 8 }} onClick={() => setSelectedDoctor({ ...selectedDoctor, mode: "schedule" })}>Schedule for Later</button>
-                </div>
-              ) : (
+
+              {bookingStep === 1 && (
                 <>
-                  {scheduleStep === 1 && <>
-                    <div className="form-group"><label className="form-label">Select Date</label><input className="form-input" type="date" defaultValue="2026-02-24" /></div>
-                    <div className="form-group"><label className="form-label">Select Time</label><div className="time-slots">{timeSlots.map(t => <div key={t} className={"time-slot" + (selectedTime === t ? " selected" : "")} onClick={() => setSelectedTime(t)}>{t}</div>)}</div></div>
-                    <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => setScheduleStep(2)}>Continue</button>
-                  </>}
-                  {scheduleStep === 2 && <>
-                    <div className="form-group"><label className="form-label">Consultation Type</label>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                        {["Video","Audio","Chat"].map(m => <div key={m} style={{ border: "1.5px solid #dce8eb", borderRadius: 10, padding: 12, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--navy)", fontFamily: "'Manrope',sans-serif" }}>{m}</div>)}
+                  <div className="form-group">
+                    <label className="form-label">Select Date</label>
+                    <input
+                      className="form-input"
+                      type="date"
+                      value={selectedDate}
+                      min={new Date().toISOString().split('T')[0]}
+                      onChange={e => handleDateChange(e.target.value, selectedDoctor.id)}
+                    />
+                  </div>
+                  {selectedDate && availableSlots.length === 0 && (
+                    <div style={{ padding: '12px 14px', background: '#fee2e2', borderRadius: 10, fontSize: 13, color: '#991b1b', fontFamily: "'Manrope',sans-serif", marginBottom: 16 }}>
+                      No available slots for this day. Please choose another date.
+                    </div>
+                  )}
+                  {selectedDate && availableSlots.length > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Select Time</label>
+                      <div className="time-slots">
+                        {generateTimeOptions(availableSlots).map(t => (
+                          <div key={t} className={'time-slot' + (selectedTime === t ? ' selected' : '')} onClick={() => setSelectedTime(t)}>
+                            {t}
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <div className="form-group"><label className="form-label">Reason for Visit</label><textarea className="form-input" rows={3} placeholder="Describe your symptoms..." style={{ resize: "none" }} /></div>
-                    <div style={{ background: "var(--primary-pale)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
-                      <div style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 6, fontSize: 13, fontFamily: "'Montserrat',sans-serif" }}>Booking Summary</div>
-                      <div style={{ fontSize: 12, color: "var(--navy-light)", lineHeight: 1.8, fontFamily: "'Manrope',sans-serif" }}>Time: {selectedTime || "9:00 AM"}, Feb 24, 2026<br />Doctor: {selectedDoctor.name}<br />Fee: N{selectedDoctor.price.toLocaleString()} from wallet</div>
+                  )}
+                  <div className="form-group">
+                    <label className="form-label">Consultation Type</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      {['video', 'audio', 'chat'].map(t => (
+                        <div
+                          key={t}
+                          onClick={() => setConsultationType(t)}
+                          style={{ border: `1.5px solid ${consultationType === t ? 'var(--primary)' : '#dce8eb'}`, borderRadius: 10, padding: 12, textAlign: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: consultationType === t ? 'var(--primary)' : 'var(--navy)', background: consultationType === t ? 'var(--primary-pale)' : 'white', fontFamily: "'Manrope',sans-serif" }}
+                        >
+                          {t.charAt(0).toUpperCase() + t.slice(1)}
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn btn-outline btn-sm" onClick={() => setScheduleStep(1)}>Back</button>
-                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setSelectedDoctor(null)}>Confirm Booking</button>
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setBookingStep(2)}
+                    disabled={!selectedDate || !selectedTime}
+                  >
+                    Continue
+                  </button>
+                </>
+              )}
+
+              {bookingStep === 2 && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Reason for Visit</label>
+                    <textarea
+                      className="form-input"
+                      rows={3}
+                      placeholder="Briefly describe your symptoms or reason for consultation..."
+                      value={reason}
+                      onChange={e => setReason(e.target.value)}
+                      style={{ resize: 'none' }}
+                    />
+                  </div>
+
+                  <div style={{ background: 'var(--primary-pale)', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--navy)', marginBottom: 10, fontSize: 13, fontFamily: "'Montserrat',sans-serif" }}>Booking Summary</div>
+                    <div style={{ fontSize: 13, color: 'var(--navy-light)', lineHeight: 2, fontFamily: "'Manrope',sans-serif" }}>
+                      <div>Doctor: <strong>{selectedDoctor.full_name}</strong></div>
+                      <div>Date: <strong>{selectedDate}</strong></div>
+                      <div>Time: <strong>{selectedTime}</strong></div>
+                      <div>Type: <strong>{consultationType}</strong></div>
+                      <div>Fee: <strong style={{ color: 'var(--danger)' }}>N1,000</strong> will be deducted from wallet</div>
+                      <div>Wallet Balance After: <strong style={{ color: wallet && Number(wallet.balance) >= 1000 ? 'var(--success)' : 'var(--danger)' }}>
+                        N{wallet ? (Number(wallet.balance) - 1000).toLocaleString() : '0'}
+                      </strong></div>
                     </div>
-                  </>}
+                  </div>
+
+                  {bookingError && (
+                    <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>
+                      {bookingError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setBookingStep(1)}>Back</button>
+                    <button className="btn btn-primary" style={{ flex: 2 }} onClick={confirmBooking} disabled={booking}>
+                      {booking ? 'Confirming...' : 'Confirm Booking — N1,000'}
+                    </button>
+                  </div>
                 </>
               )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Active Call UI */}
+      {callActive && (
+        <div style={{ position: 'fixed', inset: 0, background: '#0f1f2e', zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '18px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>
+                {callType === 'video' ? 'Video' : 'Audio'} Consultation
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: "'Manrope',sans-serif" }}>
+                {callDoctor?.full_name} · {callDoctor?.specialty}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)' }} />
+              <span style={{ fontSize: 12, color: 'var(--success)', fontFamily: "'Manrope',sans-serif" }}>Connected</span>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: 24 }}>
+            {callType === 'video' ? (
+              <>
+                <div ref={remoteRef} style={{ width: '100%', maxWidth: 800, height: 450, background: '#1a2f42', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {remoteUsers.length === 0 && (
+                    <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontFamily: "'Manrope',sans-serif" }}>
+                      <div style={{ fontSize: 48, marginBottom: 12 }}>👨‍⚕️</div>
+                      <div>Waiting for doctor to join...</div>
+                    </div>
+                  )}
+                </div>
+                <div ref={localRef} style={{ position: 'absolute', bottom: 40, right: 40, width: 160, height: 120, background: '#0f1f2e', borderRadius: 12, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }} />
+              </>
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ width: 120, height: 120, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 32, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>
+                  {getInitials(callDoctor?.full_name)}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'white', fontFamily: "'Montserrat',sans-serif" }}>{callDoctor?.full_name}</div>
+                <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>
+                  {remoteUsers.length > 0 ? 'Call connected' : 'Waiting for doctor to join...'}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 20 }}>
+                  {[0,1,2].map(i => (
+                    <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--primary)', animation: 'pulse 1.5s infinite', animationDelay: `${i * 0.3}s` }} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'center', gap: 16, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+            <button
+              onClick={endCall}
+              style={{ padding: '14px 32px', borderRadius: 50, background: 'var(--danger)', color: 'white', border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: "'Montserrat',sans-serif" }}
+            >
+              End Call
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ChatPage() {
-  const [active, setActive] = useState(0);
-  const [msg, setMsg] = useState("");
-  const [messages, setMessages] = useState(CHAT_MESSAGES);
-  const send = () => {
-    if (!msg.trim()) return;
-    setMessages([...messages, { id: Date.now(), text: msg, sent: true, time: "Now" }]);
-    setMsg("");
+function DocumentsPage({ userId }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [label, setLabel] = useState('General');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+  const fileRef = useRef();
+
+  const CATEGORIES = ['General', 'Lab Result', 'Prescription', 'Scan', 'Report', 'Insurance', 'Other'];
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchDocuments();
+  }, [userId]);
+
+  const fetchDocuments = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    setDocuments(data || []);
+    setLoading(false);
   };
+
+  const handleFileSelect = (file) => {
+    if (!file) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+    if (!allowed.includes(file.type)) {
+      setUploadError('Only JPG, PNG and PDF files are allowed.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('File size must be under 10MB.');
+      return;
+    }
+    setUploadError('');
+    setSelectedFile(file);
+  };
+
+  const uploadDocument = async () => {
+    if (!selectedFile || !userId) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const ext = selectedFile.name.split('.').pop();
+      const path = `${userId}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(path, selectedFile, { upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('documents')
+        .getPublicUrl(path);
+
+      const { data, error: dbError } = await supabase
+        .from('documents')
+        .insert({
+          user_id: userId,
+          name: selectedFile.name,
+          file_url: urlData.publicUrl,
+          type: selectedFile.type,
+          file_size: selectedFile.size,
+          label: label,
+        })
+        .select()
+        .single();
+      if (dbError) throw dbError;
+
+      setDocuments([data, ...documents]);
+      setShowUpload(false);
+      setSelectedFile(null);
+      setLabel('General');
+    } catch (e) {
+      setUploadError('Upload failed: ' + e.message);
+    }
+    setUploading(false);
+  };
+
+  const deleteDocument = async (doc) => {
+    if (!window.confirm('Delete this document?')) return;
+    const path = doc.file_url.split('/documents/')[1];
+    await supabase.storage.from('documents').remove([path]);
+    await supabase.from('documents').delete().eq('id', doc.id);
+    setDocuments(documents.filter(d => d.id !== doc.id));
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return 'N/A';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const getFileIcon = (type) => {
+    if (!type) return 'DOC';
+    if (type.includes('pdf')) return 'PDF';
+    if (type.includes('image')) return 'IMG';
+    return 'DOC';
+  };
+
+  const getFileColor = (type) => {
+    if (!type) return '#e8f6f9';
+    if (type.includes('pdf')) return '#fee2e2';
+    if (type.includes('image')) return '#dcfce7';
+    return '#e8f6f9';
+  };
+
+  const getFileTextColor = (type) => {
+    if (!type) return 'var(--primary)';
+    if (type.includes('pdf')) return 'var(--danger)';
+    if (type.includes('image')) return 'var(--success)';
+    return 'var(--primary)';
+  };
+
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">Messages</div><div className="page-sub">Chat with your doctors and support team</div></div></div>
-      <div className="chat-layout" style={{ height: "calc(100vh - 160px)" }}>
-        <div className="chat-sidebar">
-          <div className="chat-sidebar-header"><input className="chat-search" placeholder="Search conversations..." /></div>
-          {CHAT_CONTACTS.map((c, i) => (
-            <div key={c.id} className={"chat-contact" + (active === i ? " active" : "")} onClick={() => setActive(i)}>
-              <div style={{ position: "relative" }}>
-                <div className="chat-contact-avatar">{c.initials}</div>
-                {c.online && <div style={{ position: "absolute", bottom: 2, right: 2, width: 9, height: 9, background: "var(--success)", borderRadius: "50%", border: "2px solid white" }} />}
+      <div className="topbar">
+        <div>
+          <div className="page-title">Health Documents</div>
+          <div className="page-sub">Upload and manage your medical records</div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowUpload(true)}>+ Upload Document</button>
+      </div>
+
+      {/* Upload zone */}
+      <div
+        className="upload-zone"
+        style={{ border: `2px dashed ${dragOver ? 'var(--primary)' : '#b0cccf'}`, background: dragOver ? 'var(--primary-pale)' : 'white', cursor: 'pointer', marginBottom: 24 }}
+        onClick={() => fileRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); handleFileSelect(e.dataTransfer.files[0]); setShowUpload(true); }}
+      >
+        <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', fontWeight: 800, fontSize: 11, color: 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>
+          UPLOAD
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+          Drag and drop files here or click to browse
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--slate)', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>
+          Supports JPG, PNG and PDF — Max 10MB
+        </div>
+        <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.pdf" style={{ display: 'none' }} onChange={e => { handleFileSelect(e.target.files[0]); setShowUpload(true); }} />
+      </div>
+
+      {/* Documents list */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+      ) : documents.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+          No documents uploaded yet.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {documents.map(doc => (
+            <div key={doc.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px' }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: getFileColor(doc.type), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: getFileTextColor(doc.type), fontFamily: "'Montserrat',sans-serif", flexShrink: 0 }}>
+                {getFileIcon(doc.type)}
               </div>
-              <div style={{ flex: 1, overflow: "hidden" }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}><div className="chat-contact-name">{c.name}</div><div className="chat-contact-time">{c.time}</div></div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
-                  <div className="chat-contact-last">{c.lastMsg}</div>
-                  {c.unread > 0 && <span className="chat-unread">{c.unread}</span>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {doc.name}
                 </div>
+                <div style={{ fontSize: 12, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
+                  {doc.label} · {formatSize(doc.file_size)} · {new Date(doc.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                
+              href={doc.file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-outline btn-sm"
+                  style={{ textDecoration: 'none', display: 'inline-block' }}
+                  
+                <button
+                  className="btn btn-sm"
+                  style={{ background: '#fee2e2', color: 'var(--danger)', border: 'none' }}
+                  onClick={() => deleteDocument(doc)}
+                >
+                  Delete
+                </button>
               </div>
             </div>
           ))}
         </div>
-        <div className="chat-main">
-          <div className="chat-header">
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "white", fontFamily: "'Montserrat',sans-serif" }}>{CHAT_CONTACTS[active].initials}</div>
-            <div><div style={{ fontWeight: 700, fontSize: 14, color: "var(--navy)", fontFamily: "'Montserrat',sans-serif" }}>{CHAT_CONTACTS[active].name}</div><div style={{ fontSize: 11, color: CHAT_CONTACTS[active].online ? "var(--success)" : "var(--slate)", fontFamily: "'Manrope',sans-serif" }}>{CHAT_CONTACTS[active].online ? "Online" : "Offline"}</div></div>
-            <div className="chat-header-actions">
-              <button className="chat-action-btn">Video</button>
-              <button className="chat-action-btn">Audio</button>
-              <button className="chat-action-btn">Files</button>
+      )}
+
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="modal-overlay" onClick={() => { setShowUpload(false); setSelectedFile(null); setUploadError(''); }}>
+          <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Upload Document</div>
+              <button className="modal-close" onClick={() => { setShowUpload(false); setSelectedFile(null); setUploadError(''); }}>X</button>
             </div>
-          </div>
-          <div className="chat-messages">
-            {messages.map(m => (
-              <div key={m.id} className={"chat-msg " + (m.sent ? "sent" : "received")}>
-                <div className={"chat-bubble " + (m.sent ? "sent" : "received")}>{m.text}</div>
-                <div className={"chat-time" + (m.sent ? " sent" : "")}>{m.time}</div>
+            <div className="modal-body">
+              {!selectedFile ? (
+                <div
+                  style={{ border: '2px dashed #b0cccf', borderRadius: 12, padding: 32, textAlign: 'center', cursor: 'pointer' }}
+                  onClick={() => fileRef.current.click()}
+                >
+                  <div style={{ fontSize: 13, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+                    Click to select a file
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--slate-light)', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>
+                    JPG, PNG or PDF — Max 10MB
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: 'var(--primary-pale)', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: getFileColor(selectedFile.type), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: getFileTextColor(selectedFile.type), fontFamily: "'Montserrat',sans-serif" }}>
+                    {getFileIcon(selectedFile.type)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedFile.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>{formatSize(selectedFile.size)}</div>
+                  </div>
+                  <button onClick={() => setSelectedFile(null)} style={{ background: 'none', border: 'none', color: 'var(--slate)', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginTop: 16 }}>
+                <label className="form-label">Category</label>
+                <select className="form-select" value={label} onChange={e => setLabel(e.target.value)}>
+                  {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                </select>
               </div>
-            ))}
-          </div>
-          <div className="chat-input-area">
-            <button className="chat-attach">Attach</button>
-            <button className="chat-attach">Voice</button>
-            <input className="chat-input" placeholder="Type a message..." value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
-            <button className="btn btn-primary btn-sm" onClick={send} style={{ padding: "9px 14px" }}>Send</button>
+
+              {uploadError && (
+                <div style={{ background: '#fee2e2', color: 'var(--danger)', padding: '10px 14px', borderRadius: 9, fontSize: 13, marginBottom: 16, fontFamily: "'Manrope',sans-serif" }}>
+                  {uploadError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => { setShowUpload(false); setSelectedFile(null); setUploadError(''); }}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={uploadDocument} disabled={uploading || !selectedFile}>
+                  {uploading ? 'Uploading...' : 'Upload Document'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function DocumentsPage() {
-  return (
-    <div>
-      <div className="topbar"><div><div className="page-title">Health Documents</div><div className="page-sub">Upload and manage your medical records</div></div><button className="btn btn-primary btn-sm">+ Upload Document</button></div>
-      <div className="upload-zone">
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: "var(--primary-pale)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontWeight: 800, fontSize: 11, color: "var(--primary)", fontFamily: "'Montserrat',sans-serif" }}>UPLOAD</div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--navy)", fontFamily: "'Montserrat',sans-serif" }}>Drag and drop files here or click to browse</div>
-        <div style={{ fontSize: 12, color: "var(--slate)", marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>Supports PDF, JPG, PNG - Max 50MB per file</div>
-      </div>
-      <div style={{ display: "flex", gap: 7, marginBottom: 18 }}>
-        {["All","Lab Results","Prescriptions","Reports"].map(f => <button key={f} className={"btn btn-sm " + (f === "All" ? "btn-primary" : "btn-outline")}>{f}</button>)}
-      </div>
-      <div className="documents-grid">
-        {DOCUMENTS.map(doc => (
-          <div key={doc.id} className="doc-card">
-            <div className="doc-icon" style={{ background: doc.bg, color: doc.color }}>{doc.label}</div>
-            <div className="doc-name">{doc.name}</div>
-            <div className="doc-meta">{doc.size} - {doc.date}</div>
-            <span className={"doc-tag " + doc.type}>{doc.type}</span>
-            <div style={{ display: "flex", gap: 5, marginTop: 10 }}>
-              <button className="btn btn-outline btn-sm" style={{ flex: 1, padding: "5px 7px" }}>View</button>
-              <button className="btn btn-outline btn-sm" style={{ flex: 1, padding: "5px 7px" }}>Download</button>
-              <button className="btn btn-sm" style={{ flex: 1, padding: "5px 7px", background: "#fee2e2", color: "var(--danger)", border: "none" }}>Delete</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+function AppointmentsPage({ userId }) {
+  const [tab, setTab] = useState('Upcoming');
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-function AppointmentsPage() {
+  useEffect(() => {
+    if (!userId) return;
+    fetchAppointments();
+  }, [userId]);
+
+  const fetchAppointments = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: false });
+    setAppointments(data || []);
+    setLoading(false);
+  };
+
+  const cancelAppointment = async (id) => {
+    if (!window.confirm('Cancel this appointment?')) return;
+    await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', id);
+    setAppointments(appointments.map(a => a.id === id ? { ...a, status: 'cancelled' } : a));
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return 'N/A';
+    return new Date(iso).toLocaleDateString('en-NG', {
+      weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+      timeZone: 'Africa/Lagos'
+    });
+  };
+
+  const formatTime = (iso) => {
+    if (!iso) return 'N/A';
+    return new Date(iso).toLocaleTimeString('en-NG', {
+      hour: '2-digit', minute: '2-digit', hour12: true,
+      timeZone: 'Africa/Lagos'
+    }) + ' WAT';
+  };
+
+  const filtered = appointments.filter(a => {
+    if (tab === 'Upcoming') return a.status === 'upcoming' || a.status === 'active';
+    if (tab === 'Completed') return a.status === 'completed';
+    if (tab === 'Cancelled') return a.status === 'cancelled';
+    return true;
+  });
+
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">Appointments</div><div className="page-sub">Your scheduled and past consultations</div></div><button className="btn btn-primary btn-sm">+ Book New</button></div>
-      <div className="tab-bar">{["Upcoming","Completed","Cancelled"].map((t, i) => <button key={t} className={"tab-btn" + (i === 0 ? " active" : "")}>{t}</button>)}</div>
-      <div className="schedule-list">
-        {APPOINTMENTS.map(a => (
-          <div key={a.id} className="appt-item">
-            <div style={{ minWidth: 56, textAlign: "center" }}><div className="appt-time-val">{a.time}</div><div className="appt-time-date">{a.date}</div></div>
-            <div className="appt-divider" />
-            <div style={{ flex: 1 }}><div className="appt-title">{a.title}</div><div className="appt-doctor">{a.doctor}</div></div>
-            <span className="badge badge-info">{a.type}</span>
-            <div style={{ display: "flex", gap: 7 }}>
-              <button className="btn btn-primary btn-sm">Join</button>
-              <button className="btn btn-outline btn-sm">Reschedule</button>
-              <button className="btn btn-sm" style={{ background: "#fee2e2", color: "var(--danger)", border: "none" }}>Cancel</button>
-            </div>
-          </div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Appointments</div>
+          <div className="page-sub">Your scheduled and past consultations</div>
+        </div>
+      </div>
+
+      <div className="tab-bar">
+        {['Upcoming', 'Completed', 'Cancelled'].map(t => (
+          <button
+            key={t}
+            className={'tab-btn' + (tab === t ? ' active' : '')}
+            onClick={() => setTab(t)}
+          >
+            {t}
+            {t === 'Upcoming' && appointments.filter(a => a.status === 'upcoming' || a.status === 'active').length > 0 && (
+              <span style={{ marginLeft: 6, background: 'var(--primary)', color: 'white', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>
+                {appointments.filter(a => a.status === 'upcoming' || a.status === 'active').length}
+              </span>
+            )}
+          </button>
         ))}
       </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Loading...</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+          No {tab.toLowerCase()} appointments.
+        </div>
+      ) : (
+        <div className="schedule-list">
+          {filtered.map(a => (
+            <div key={a.id} className="appt-item">
+              <div style={{ minWidth: 70, textAlign: 'center' }}>
+                <div className="appt-time-val" style={{ fontSize: 13 }}>{formatTime(a.date)}</div>
+                <div className="appt-time-date">{formatDate(a.date)}</div>
+              </div>
+              <div className="appt-divider" />
+              <div style={{ flex: 1 }}>
+                <div className="appt-title">{a.title || 'Consultation'}</div>
+                <div className="appt-doctor">{a.doctor_name || 'Doctor'}</div>
+                {a.notes && (
+                  <div style={{ fontSize: 11, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
+                    {a.notes}
+                  </div>
+                )}
+              </div>
+              <span className={'badge ' + (
+                a.status === 'completed' ? 'badge-success' :
+                a.status === 'cancelled' ? 'badge-danger' :
+                a.status === 'active' ? 'badge-warning' : 'badge-info'
+              )}>
+                {a.status || 'upcoming'}
+              </span>
+              <div style={{ display: 'flex', gap: 7 }}>
+                {(a.status === 'upcoming' || a.status === 'active') && (
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#fee2e2', color: 'var(--danger)', border: 'none' }}
+                    onClick={() => cancelAppointment(a.id)}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1353,23 +4211,372 @@ function ClaimsPage() {
   );
 }
 
-function Transactions() {
+function Transactions({ userId, userName }) {
+  const [transactions, setTransactions] = useState([]);
+  const [filtered, setFiltered] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [showFilter, setShowFilter] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchTransactions();
+  }, [userId]);
+
+  const fetchTransactions = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (!error) {
+        setTransactions(data || []);
+        setFiltered(data || []);
+      }
+    } catch (e) {
+      console.error('Transactions fetch error:', e.message);
+    }
+    setLoading(false);
+  };
+
+  // Apply filters
+  useEffect(() => {
+    let result = [...transactions];
+    if (typeFilter !== 'all') {
+      result = result.filter(t => t.type === typeFilter);
+    }
+    if (dateFrom) {
+      result = result.filter(t => new Date(t.created_at) >= new Date(dateFrom));
+    }
+    if (dateTo) {
+      result = result.filter(t => new Date(t.created_at) <= new Date(dateTo + 'T23:59:59'));
+    }
+    setFiltered(result);
+  }, [typeFilter, dateFrom, dateTo, transactions]);
+
+  const totalCredits = filtered
+    .filter(t => t.type === 'credit')
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+
+  const totalDebits = filtered
+    .filter(t => t.type === 'debit')
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+
+  const fmt = (n) => `N${Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+
+  const getTxnStyle = (txn) => {
+    const desc = (txn.description || '').toLowerCase();
+    if (txn.type === 'credit') return { label: 'TOP', bg: '#dcfce7', color: '#166634' };
+    if (desc.includes('consult') || desc.includes('doctor')) return { label: 'MED', bg: '#fee2e2', color: '#991b1b' };
+    if (desc.includes('lab') || desc.includes('test')) return { label: 'LAB', bg: '#eff6ff', color: '#1d4ed8' };
+    if (desc.includes('pharma') || desc.includes('drug') || desc.includes('medic')) return { label: 'PHM', bg: '#f3e8ff', color: '#6b21a8' };
+    if (desc.includes('insur')) return { label: 'INS', bg: '#fef9c3', color: '#854d0e' };
+    return { label: 'TXN', bg: '#f4f9fa', color: '#5a7a8a' };
+  };
+
+  const formatTxnDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString())
+      return `Today, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    if (d.toDateString() === yesterday.toDateString())
+      return `Yesterday, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const clearFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setTypeFilter('all');
+    setShowFilter(false);
+  };
+
+  const hasFilters = dateFrom || dateTo || typeFilter !== 'all';
+
+  // PDF Export
+  const downloadPDF = () => {
+    const doc = new window.jspdf.jsPDF();
+
+    // Header background
+    doc.setFillColor(13, 110, 130);
+    doc.rect(0, 0, 210, 30, 'F');
+
+    // Logo text
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Span Healthcare', 14, 13);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Health Savings Platform', 14, 21);
+
+    // Statement label top right
+    doc.setFontSize(10);
+    doc.text('TRANSACTION STATEMENT', 140, 13);
+    doc.setFontSize(8);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-NG', { day: '2-digit', month: 'long', year: 'numeric' })}`, 140, 21);
+
+    // User info
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Account Name: ${userName || 'Member'}`, 14, 42);
+    doc.text(`Period: ${dateFrom || 'All time'} to ${dateTo || 'Today'}`, 14, 50);
+
+    // Summary box
+    doc.setFillColor(232, 246, 249);
+    doc.roundedRect(14, 57, 182, 24, 3, 3, 'F');
+    doc.setFontSize(8);
+    doc.setTextColor(90, 122, 138);
+    doc.text('TOTAL FUNDED', 22, 65);
+    doc.text('TOTAL SPENT', 90, 65);
+    doc.text('NET', 160, 65);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(47, 184, 138);
+    doc.text(fmt(totalCredits), 22, 75);
+    doc.setTextColor(224, 82, 82);
+    doc.text(fmt(totalDebits), 90, 75);
+    const net = totalCredits - totalDebits;
+    doc.setTextColor(net >= 0 ? 47 : 224, net >= 0 ? 184 : 82, net >= 0 ? 138 : 82);
+    doc.text(fmt(net), 160, 75);
+
+    // Table
+    const tableRows = filtered.map(t => [
+      new Date(t.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }),
+      t.description || 'Transaction',
+      t.type === 'credit' ? 'Credit' : 'Debit',
+      `${t.type === 'credit' ? '+' : '-'}${fmt(t.amount)}`,
+    ]);
+
+    doc.autoTable({
+      startY: 88,
+      head: [['Date', 'Description', 'Type', 'Amount']],
+      body: tableRows,
+      headStyles: {
+        fillColor: [13, 110, 130],
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: { fontSize: 9, textColor: [30, 41, 59] },
+      alternateRowStyles: { fillColor: [244, 249, 250] },
+      columnStyles: {
+        0: { cellWidth: 32 },
+        1: { cellWidth: 90 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 32, halign: 'right' },
+      },
+      didParseCell: (data) => {
+        if (data.column.index === 3 && data.section === 'body') {
+          const val = data.cell.text[0] || '';
+          data.cell.styles.textColor = val.startsWith('+') ? [47, 184, 138] : [224, 82, 82];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+
+    // Footer
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        `Span Healthcare — Confidential | Page ${i} of ${pageCount}`,
+        14,
+        doc.internal.pageSize.height - 8
+      );
+    }
+
+    doc.save(`SpanHC_Statement_${dateFrom || 'all'}_to_${dateTo || 'today'}.pdf`);
+  };
+
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">Transactions</div><div className="page-sub">Full history of wallet activity</div></div><div style={{ display: "flex", gap: 7 }}><button className="btn btn-outline btn-sm">Export</button><button className="btn btn-outline btn-sm">Filter</button></div></div>
-      <div className="card">
-        <div className="txn-list">
-          {TRANSACTIONS.map(t => (
-            <div key={t.id} className="txn-item">
-              <div className="txn-icon" style={{ background: t.bg, color: t.color }}>{t.label}</div>
-              <div className="txn-info"><div className="txn-name">{t.name}</div><div className="txn-date">{t.date}</div></div>
-              <div style={{ textAlign: "right" }}>
-                <div className={"txn-amount " + t.type}>{t.type === "credit" ? "+" : "-"}N{t.amount.toLocaleString()}</div>
-                <span className={"badge " + (t.type === "credit" ? "badge-success" : "badge-info")} style={{ fontSize: 10, marginTop: 3 }}>{t.type}</span>
-              </div>
-            </div>
-          ))}
+      <div className="topbar">
+        <div>
+          <div className="page-title">Transactions</div>
+          <div className="page-sub">Full history of your wallet activity</div>
         </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-outline btn-sm"
+            style={{ width: 'auto', position: 'relative' }}
+            onClick={() => setShowFilter(!showFilter)}
+          >
+            {hasFilters ? '● Filter Active' : 'Filter'}
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            style={{ width: 'auto' }}
+            onClick={downloadPDF}
+            disabled={filtered.length === 0}
+          >
+            Export PDF
+          </button>
+        </div>
+      </div>
+
+      {/* Filter panel */}
+      {showFilter && (
+        <div className="card" style={{ marginBottom: 16, padding: '20px 24px' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', marginBottom: 16, fontFamily: "'Montserrat',sans-serif" }}>
+            Filter Transactions
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">From Date</label>
+              <input
+                className="form-input"
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">To Date</label>
+              <input
+                className="form-input"
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-group" style={{ marginBottom: 16 }}>
+            <label className="form-label">Transaction Type</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['all', 'credit', 'debit'].map(t => (
+                <button
+                  key={t}
+                  className={`btn btn-sm ${typeFilter === t ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ width: 'auto' }}
+                  onClick={() => setTypeFilter(t)}
+                >
+                  {t === 'all' ? 'All' : t === 'credit' ? 'Credits Only' : 'Debits Only'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ width: 'auto' }}
+              onClick={() => setShowFilter(false)}
+            >
+              Apply Filter
+            </button>
+            {hasFilters && (
+              <button
+                className="btn btn-sm"
+                style={{ background: '#fee2e2', color: 'var(--danger)', border: 'none', width: 'auto' }}
+                onClick={clearFilters}
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 20 }}>
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#dcfce7', color: '#166634' }}>IN</span>
+          <div className="stat-value" style={{ marginTop: 6, fontSize: 20 }}>
+            {loading ? '—' : fmt(totalCredits)}
+          </div>
+          <div className="stat-label">Total Funded</div>
+          <div className="stat-change up">
+            {filtered.filter(t => t.type === 'credit').length} credit(s)
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#fee2e2', color: '#991b1b' }}>OUT</span>
+          <div className="stat-value" style={{ marginTop: 6, fontSize: 20 }}>
+            {loading ? '—' : fmt(totalDebits)}
+          </div>
+          <div className="stat-label">Total Spent</div>
+          <div className="stat-change down">
+            {filtered.filter(t => t.type === 'debit').length} debit(s)
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-tag" style={{ background: '#e8f6f9', color: '#2d8a9e' }}>NET</span>
+          <div className="stat-value" style={{ marginTop: 6, fontSize: 20, color: totalCredits - totalDebits >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            {loading ? '—' : fmt(totalCredits - totalDebits)}
+          </div>
+          <div className="stat-label">Net</div>
+          <div className="stat-change up">{filtered.length} shown</div>
+        </div>
+      </div>
+
+      {/* Transaction list */}
+      <div className="card">
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
+            Loading transactions...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 11, color: 'var(--primary)', margin: '0 auto 14px', fontFamily: "'Montserrat',sans-serif" }}>
+              EMPTY
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+              {hasFilters ? 'No transactions match your filters' : 'No transactions yet'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--slate)', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>
+              {hasFilters ? 'Try adjusting or clearing your filters' : 'Your transaction history will appear here once you fund your wallet'}
+            </div>
+            {hasFilters && (
+              <button className="btn btn-outline btn-sm" style={{ marginTop: 14, width: 'auto' }} onClick={clearFilters}>
+                Clear Filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="txn-list">
+            {filtered.map(t => {
+              const style = getTxnStyle(t);
+              return (
+                <div key={t.id} className="txn-item">
+                  <div className="txn-icon" style={{ background: style.bg, color: style.color }}>
+                    {style.label}
+                  </div>
+                  <div className="txn-info">
+                    <div className="txn-name">{t.description || 'Transaction'}</div>
+                    <div className="txn-date">
+                      {formatTxnDate(t.created_at)}
+                      {t.reference && (
+                        <span style={{ marginLeft: 8, background: '#f1f5f9', padding: '1px 7px', borderRadius: 20, fontSize: 10, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>
+                          Ref: {t.reference}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className={`txn-amount ${t.type}`}>
+                      {t.type === 'credit' ? '+' : '-'}N{Number(t.amount).toLocaleString()}
+                    </div>
+                    <span className={`badge ${t.type === 'credit' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10, marginTop: 3 }}>
+                      {t.type}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1442,6 +4649,8 @@ export default function App() {
   const [userPhoto] = useState(null);
   const [userName, setUserName] = useState("Loading...");
   const [userId, setUserId] = useState(null);
+  const [doctorUser, setDoctorUser] = useState(null);
+  const [doctorProfile, setDoctorProfile] = useState(null);
 
   useEffect(() => {
     getCurrentUser().then(user => {
@@ -1449,7 +4658,7 @@ export default function App() {
         setAuthed(true);
         setUserId(user.id);
         getProfile(user.id).then(profile => {
-          if (profile) setUserName(profile.full_name);
+          if (profile) setUserName(profile.full_name ? profile.full_name.split(' ')[0] : 'User');
         }).catch(() => {});
       }
     });
@@ -1471,33 +4680,50 @@ export default function App() {
     setUserName("Loading...");
     setPage("dashboard");
   };
-
+  const handleDoctorLogin = (user, profile) => {
+    setDoctorUser(user);
+    setDoctorProfile(profile);
+    setAuthed(true);
+  };
   const pages = {
-    dashboard: <Dashboard onNav={setPage} userName={userName} />,
-    wallet: <WalletPage />,
-    transactions: <Transactions />,
-    telemedicine: <TelemedicinePage />,
-    appointments: <AppointmentsPage />,
-    chat: <ChatPage />,
-    documents: <DocumentsPage />,
+    dashboard: <Dashboard onNav={setPage} userName={userName} userId={userId} />,
+    wallet: <WalletPage userId={userId} />,
+    transactions: <Transactions userId={userId} userName={userName} />,
+    telemedicine: <TelemedicinePage userId={userId} userName={userName} />,
+    chat: <MessagesPage userId={userId} userName={userName} />,
+    appointments: <AppointmentsPage userId={userId} />,
+    documents: <DocumentsPage userId={userId} />,
     wellness: <WellnessPage />,
     profile: <ProfilePage userId={userId} />,
-    dependents: <DependentsPage />,
+    dependents: <DependentsPage userId={userId} />,
     claims: <ClaimsPage />,
     settings: <Settings />,
   };
 
-  if (!authed) return <><style>{styles}</style><AuthScreen onLogin={handleLogin} /></>;
+  if (!authed) return <><style>{styles}</style><AuthScreen onLogin={handleLogin} onDoctorLogin={handleDoctorLogin} /></>;
 
+if (authed && doctorProfile) {
   return (
     <>
       <style>{styles}</style>
-      <div className="app">
-        <div className="main-layout">
-          <Sidebar active={page} onNav={setPage} userPhoto={userPhoto} userName={userName} onLogout={handleLogout} />
-          <div className="main-content">{pages[page] || pages.dashboard}</div>
-        </div>
-      </div>
+      <DoctorDashboard
+        doctorProfile={doctorProfile}
+        doctorUser={doctorUser}
+        onLogout={handleLogout}
+      />
     </>
   );
+}
+
+return (
+  <>
+    <style>{styles}</style>
+    <div className="app">
+      <div className="main-layout">
+        <Sidebar active={page} onNav={setPage} userPhoto={userPhoto} userName={userName} onLogout={handleLogout} />
+        <div className="main-content">{pages[page] || pages.dashboard}</div>
+      </div>
+    </div>
+  </>
+);
 }
