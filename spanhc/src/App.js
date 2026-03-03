@@ -730,7 +730,7 @@ function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   const sections = [
     { label: "", items: [{ id: "dashboard", label: "Dashboard", short: "DB" }, { id: "wallet", label: "Wallet", short: "WL" }, { id: "transactions", label: "Transactions", short: "TX" }] },
     { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG" }, { id: "documents", label: "Documents", short: "DOC" }] },
-    { label: "Account", items: [{ id: "profile", label: "My Profile", short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { id: "settings", label: "Settings", short: "ST" }] },
+    { label: "Account", items: [{ id: "profile", label: "My Profile", short: "PR" }, { id: "dependents", label: "Dependents", short: "DP" }, { id: "settings", label: "Get Help", short: "HELP" }] },
   ];
   const initials = userName ? userName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() : "EO";
   return (
@@ -2157,18 +2157,49 @@ function DoctorMessagesPage({ doctorUserId, doctorName }) {
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedPatient || !doctorUserId) return;
+    if (!newMessage.trim() && !selectedChatFile || !selectedPatient || !doctorUserId) return;
     setSending(true);
-    const { data, error } = await supabase.from('messages').insert({
-      sender_id: doctorUserId,
-      receiver_id: selectedPatient.user_id,
-      sender_name: doctorName,
-      content: newMessage.trim(),
-    }).select().single();
-    if (!error && data) {
-      setMessages(prev => [...prev, data]);
-      setNewMessage('');
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    try {
+      let file_url = null;
+      let file_name = null;
+      let file_type = null;
+
+      if (selectedChatFile) {
+        const ext = selectedChatFile.name.split('.').pop();
+        const path = `chat/${doctorUserId}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(path, selectedChatFile, { upsert: false });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path);
+        file_url = urlData.publicUrl;
+        file_name = selectedChatFile.name;
+        file_type = selectedChatFile.type;
+      }
+
+      const { data, error } = await supabase.from('messages').insert({
+        sender_id: doctorUserId,
+        receiver_id: selectedPatient.user_id,
+        sender_name: doctorName,
+        content: newMessage.trim() || '',
+        file_url,
+        file_name,
+        file_type,
+      }).select().single();
+
+      if (!error && data) {
+        setMessages(prev => [...prev, {
+          ...data,
+          file_type: selectedChatFile ? selectedChatFile.type : null,
+          file_name: selectedChatFile ? selectedChatFile.name : null,
+        }]);
+        setNewMessage('');
+        setSelectedChatFile(null);
+        setFilePreview(null);
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    } catch (e) {
+      console.error('Send error:', e);
     }
     setSending(false);
   };
@@ -2300,10 +2331,10 @@ function DoctorMessagesPage({ doctorUserId, doctorName }) {
                   <input
                     className="form-input"
                     style={{ flex: 1, marginBottom: 0 }}
-                    placeholder={`Message ${selectedDoctor.full_name}...`}
+                    placeholder="Type a message..."
                     value={newMessage}
                     onChange={e => setNewMessage(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    onKeyDown={e => e.key === 'Enter' && !selectedChatFile && sendMessage()}
                   />
                   <button
                     className="btn btn-primary"
@@ -2923,6 +2954,9 @@ function MessagesPage({ userId, userName }) {
   const [sending, setSending] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const messagesEndRef = useRef();
+  const chatFileRef = useRef();
+  const [selectedChatFile, setSelectedChatFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
 
   useEffect(() => {
     fetchDoctors();
@@ -3013,14 +3047,18 @@ function MessagesPage({ userId, userName }) {
         sender_id: userId,
         receiver_id: selectedDoctor.user_id,
         sender_name: userName,
-        content: newMessage.trim() || (file_name ? `Sent a file: ${file_name}` : ''),
+        content: newMessage.trim() || '',
         file_url,
         file_name,
         file_type,
       }).select().single();
 
       if (!error && data) {
-        setMessages(prev => [...prev, data]);
+        setMessages(prev => [...prev, {
+          ...data,
+          file_type: selectedChatFile ? selectedChatFile.type : null,
+          file_name: selectedChatFile ? selectedChatFile.name : null,
+        }]);
         setNewMessage('');
         setSelectedChatFile(null);
         setFilePreview(null);
@@ -3123,14 +3161,30 @@ function MessagesPage({ userId, userName }) {
                             {msg.file_type && msg.file_type.includes('image') ? (
                               <img src={msg.file_url} alt={msg.file_name} style={{ maxWidth: 220, borderRadius: 10, display: 'block' }} />
                             ) : (
-                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: isMe ? 'rgba(255,255,255,0.2)' : '#e8f6f9', borderRadius: 10, textDecoration: 'none' }}>
-                                <span style={{ fontSize: 11, fontWeight: 800, color: isMe ? 'white' : 'var(--primary)', fontFamily: "'Montserrat',sans-serif" }}>PDF</span>
-                                <span style={{ fontSize: 12, color: isMe ? 'white' : 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>{msg.file_name}</span>
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', maxWidth: 220 }}>
+                                <div style={{ border: `1.5px solid ${isMe ? 'rgba(255,255,255,0.3)' : '#dce8eb'}`, borderRadius: 12, overflow: 'hidden', background: isMe ? 'rgba(255,255,255,0.1)' : 'white' }}>
+                                  <div style={{ background: isMe ? 'rgba(255,255,255,0.15)' : '#f1f5f9', padding: '20px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
+                                    <div style={{ width: 44, height: 56, background: isMe ? 'rgba(255,255,255,0.9)' : 'white', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.12)', flexDirection: 'column', gap: 3 }}>
+                                      <div style={{ width: 24, height: 3, background: '#dce8eb', borderRadius: 2 }} />
+                                      <div style={{ width: 24, height: 3, background: '#dce8eb', borderRadius: 2 }} />
+                                      <div style={{ width: 16, height: 3, background: '#dce8eb', borderRadius: 2 }} />
+                                      <div style={{ fontSize: 8, fontWeight: 800, color: 'var(--danger)', fontFamily: "'Montserrat',sans-serif", marginTop: 2 }}>PDF</div>
+                                    </div>
+                                  </div>
+                                  <div style={{ padding: '8px 12px', borderTop: `1px solid ${isMe ? 'rgba(255,255,255,0.2)' : '#eef2f5'}` }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: isMe ? 'white' : 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
+                                      {msg.file_name}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : 'var(--slate)', fontFamily: "'Manrope',sans-serif", marginTop: 2 }}>
+                                      Click to open
+                                    </div>
+                                  </div>
+                                </div>
                               </a>
                             )}
                           </div>
                         )}
-                        {msg.content && !msg.content.startsWith('Sent a file:') && (
+                        {msg.content && (
                           <div style={{ padding: '10px 14px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'var(--primary)' : '#f1f5f9', color: isMe ? 'white' : 'var(--navy)', fontSize: 13, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6 }}>
                             {msg.content}
                           </div>
@@ -3182,7 +3236,7 @@ function MessagesPage({ userId, userName }) {
                     placeholder={`Message ${selectedDoctor.full_name}...`}
                     value={newMessage}
                     onChange={e => setNewMessage(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    onKeyDown={e => e.key === 'Enter' && !selectedChatFile && sendMessage()}
                   />
                   <button
                     className="btn btn-primary"
@@ -4592,53 +4646,44 @@ function SettingsToggle({ on = true }) {
 }
 
 function Settings() {
-  const sections = [
-    { title: "Notifications", icon: "BELL", items: [
-      { label: "Email Alerts", desc: "Appointment and transaction alerts by email", toggle: true, on: true },
-      { label: "SMS Reminders", desc: "Appointment reminders via SMS", toggle: true, on: true },
-      { label: "Push Notifications", desc: "Browser and mobile push notifications", toggle: true, on: false },
-      { label: "Health Tips Newsletter", desc: "Weekly health and wellness tips", toggle: true, on: false },
-    ]},
-    { title: "Security", icon: "LOCK", items: [
-      { label: "Two-Factor Authentication", desc: "Add an extra layer of security to your account", toggle: true, on: true },
-      { label: "Biometric Login", desc: "Use fingerprint or face ID to log in", toggle: true, on: false },
-      { label: "Login Activity Alerts", desc: "Get notified of new sign-ins", toggle: true, on: true },
-      { label: "Change Password", desc: "Update your account password", action: "Change" },
-    ]},
-    { title: "Privacy", icon: "PRIV", items: [
-      { label: "Data Sharing Preferences", desc: "Control how your data is shared", action: "Manage" },
-      { label: "Health Data Visibility", desc: "Choose who can view your health records", action: "Manage" },
-      { label: "Download My Data", desc: "Export all your data in a portable format", action: "Download" },
-      { label: "Delete Account Data", desc: "Permanently remove your account and all data", action: "Delete", danger: true },
-    ]},
-    { title: "Payment", icon: "PAY", items: [
-      { label: "Saved Payment Methods", desc: "Manage your cards and bank accounts", action: "Manage" },
-      { label: "Auto-Fund Wallet", desc: "Automatically top up when balance is low", toggle: true, on: false },
-      { label: "Spending Notifications", desc: "Get alerts for every wallet transaction", toggle: true, on: true },
-      { label: "Transaction PIN", desc: "Set a PIN for wallet transactions", action: "Set PIN" },
-    ]},
-  ];
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">Settings</div><div className="page-sub">Manage your account preferences</div></div></div>
-      {sections.map(sec => (
-        <div key={sec.title} className="settings-section">
-          <div className="settings-section-title">
-            <div className="settings-section-icon">{sec.icon}</div>
-            {sec.title}
-          </div>
-          {sec.items.map(item => (
-            <div key={item.label} className="settings-item">
-              <div className="settings-item-left">
-                <div className="settings-item-label">{item.label}</div>
-                <div className="settings-item-desc">{item.desc}</div>
-              </div>
-              {item.toggle && <SettingsToggle on={item.on} />}
-              {item.action && <button className={"settings-action" + (item.danger ? " settings-action-danger" : "")}>{item.action}</button>}
-            </div>
-          ))}
+      <div className="topbar">
+        <div>
+          <div className="page-title">Get Help</div>
+          <div className="page-sub">We are always here for you</div>
         </div>
-      ))}
+      </div>
+
+      <div className="card" style={{ maxWidth: 600, margin: '40px auto', textAlign: 'center', padding: '48px 40px' }}>
+        <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif", marginBottom: 16 }}>
+          Need Assistance?
+        </div>
+        <div style={{ fontSize: 15, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", lineHeight: 1.8, marginBottom: 36 }}>
+          We're here to support you. Reach out through any of the options below.
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <a href="mailto:info@spanhealthcare.com.ng" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 24px', background: 'var(--primary-pale)', borderRadius: 14, textDecoration: 'none', border: '1.5px solid var(--primary)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", flexShrink: 0 }}>EMAIL</div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", marginBottom: 2 }}>Email Us</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>info@spanhealthcare.com.ng</div>
+            </div>
+          </a>
+          <a href="tel:0700SPANHEALTHCARE" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 24px', background: '#f0fdf4', borderRadius: 14, textDecoration: 'none', border: '1.5px solid var(--success)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", flexShrink: 0 }}>CALL</div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", marginBottom: 2 }}>Call Us</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>0700-SPANHEALTHCARE</div>
+            </div>
+          </a>
+        </div>
+
+        <div style={{ marginTop: 36, fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif", lineHeight: 1.8 }}>
+          Our support team is available Monday – Friday, 8:00 AM – 6:00 PM WAT.
+        </div>
+      </div>
     </div>
   );
 }
