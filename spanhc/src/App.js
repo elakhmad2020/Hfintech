@@ -509,6 +509,19 @@ return;
       const result = await loginUser({ email: form.email, password: form.password });
       setLoading(false);
       if (!result.success) { setError(result.error); return; }
+      
+      // Block doctors from logging into patient portal
+      const { data: doctorCheck } = await supabase
+        .from('doctors')
+        .select('id')
+        .eq('user_id', result.user.id)
+        .single();
+      if (doctorCheck) {
+        await supabase.auth.signOut();
+        setError("This account is registered as a doctor. Please use the Doctor login.");
+        return;
+      }
+
       onLogin(result.user);
       return;
     }
@@ -573,7 +586,7 @@ onDoctorLogin(data.user, doctorData);
           {userType === "doctor" ? [
             "Set your availability and specialties",
             "Video, audio and chat consultations",
-            "Flat rate N1,000 consultation fee",
+            "Competitive consultation earnings per session",
             "Manage appointments from your dashboard",
             "Pending approval before going live",
           ] : [
@@ -1058,6 +1071,9 @@ function WalletPage({ userId }) {
   const [showFund, setShowFund] = useState(false);
   const [showStatement, setShowStatement] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [stmtFrom, setStmtFrom] = useState('');
+  const [stmtTo, setStmtTo] = useState('');
+  const [stmtFormat, setStmtFormat] = useState('PDF');
 
   useEffect(() => {
     if (!userId) return;
@@ -1067,20 +1083,10 @@ function WalletPage({ userId }) {
   const fetchWalletData = async () => {
     setLoading(true);
     try {
-      const { data: walletData } = await supabase
-        .from('wallets')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
+      const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
       setWallet(walletData);
-
-      const { data: txnData } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const { data: txnData } = await supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
       setTransactions(txnData || []);
-
     } catch (e) {
       console.error('Wallet fetch error:', e.message);
     }
@@ -1090,7 +1096,7 @@ function WalletPage({ userId }) {
   const fmt = (n) => `N${Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
 
   const getTxnStyle = (txn) => {
-    const desc = (txn.description || '').toLowerCase();
+    const desc = (txn.name || txn.description || '').toLowerCase();
     if (txn.type === 'credit') return { label: 'TOP', bg: '#dcfce7', color: '#166634' };
     if (desc.includes('consult') || desc.includes('doctor')) return { label: 'MED', bg: '#fee2e2', color: '#991b1b' };
     if (desc.includes('lab') || desc.includes('test')) return { label: 'LAB', bg: '#eff6ff', color: '#1d4ed8' };
@@ -1118,6 +1124,83 @@ function WalletPage({ userId }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const getFilteredTxns = () => {
+    return transactions.filter(t => {
+      if (!stmtFrom && !stmtTo) return true;
+      const d = new Date(t.created_at);
+      if (stmtFrom && d < new Date(stmtFrom)) return false;
+      if (stmtTo && d > new Date(stmtTo + 'T23:59:59')) return false;
+      return true;
+    });
+  };
+
+  const downloadPDF = () => {
+    const filtered = getFilteredTxns();
+    const doc = new jsPDF();
+    const teal = [30, 139, 166];
+    const navy = [26, 47, 66];
+    doc.setFillColor(...teal);
+    doc.rect(0, 0, 210, 38, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Span Healthcare', 14, 16);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Wallet Statement', 14, 25);
+    doc.setFontSize(9);
+    doc.text(`Period: ${stmtFrom || 'All'} to ${stmtTo || 'Now'}`, 14, 33);
+    const credits = filtered.filter(t => t.type === 'credit').reduce((s, t) => s + Number(t.amount), 0);
+    const debits = filtered.filter(t => t.type === 'debit').reduce((s, t) => s + Number(t.amount), 0);
+    doc.setFillColor(245, 250, 252);
+    doc.rect(14, 44, 182, 22, 'F');
+    doc.setTextColor(...navy);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total Funded: N${credits.toLocaleString()}`, 20, 53);
+    doc.text(`Total Spent: N${debits.toLocaleString()}`, 80, 53);
+    doc.text(`Net: N${(credits - debits).toLocaleString()}`, 155, 53);
+    import('jspdf-autotable').then(({ default: autoTable }) => {
+      autoTable(doc, {
+        startY: 72,
+        head: [['Date', 'Description', 'Type', 'Amount']],
+        body: filtered.map(t => [
+          new Date(t.created_at).toLocaleDateString('en-NG'),
+          t.name || t.description || 'Transaction',
+          t.type,
+          `${t.type === 'credit' ? '+' : '-'}N${Number(t.amount).toLocaleString()}`,
+        ]),
+        headStyles: { fillColor: teal, textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 252, 253] },
+      });
+      doc.save(`SpanHC_Statement_${stmtFrom || 'all'}_to_${stmtTo || 'now'}.pdf`);
+      setShowStatement(false);
+    });
+  };
+
+  const downloadExcel = () => {
+    const filtered = getFilteredTxns();
+    const rows = [
+      ['Date', 'Description', 'Type', 'Amount'],
+      ...filtered.map(t => [
+        new Date(t.created_at).toLocaleDateString('en-NG'),
+        t.name || t.description || 'Transaction',
+        t.type,
+        `${t.type === 'credit' ? '+' : '-'}${Number(t.amount).toLocaleString()}`,
+      ])
+    ];
+    const csvContent = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SpanHC_Statement_${stmtFrom || 'all'}_to_${stmtTo || 'now'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowStatement(false);
+  };
+
   return (
     <div>
       <div className="topbar">
@@ -1125,41 +1208,25 @@ function WalletPage({ userId }) {
           <div className="page-title">Wallet</div>
           <div className="page-sub">Your health savings account</div>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowFund(true)}>
-          + Fund Wallet
-        </button>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowFund(true)}>+ Fund Wallet</button>
       </div>
 
-      {/* Wallet card */}
       <div className="wallet-card" style={{ marginBottom: 24 }}>
         <div className="wallet-label">Available Balance</div>
-        <div className="wallet-amount">
-          {loading ? 'Loading...' : fmt(wallet?.balance)}
-        </div>
+        <div className="wallet-amount">{loading ? 'Loading...' : fmt(wallet?.balance)}</div>
         <div className="wallet-id">
-          {wallet?.account_number
-            ? `${wallet.account_number} · ${wallet.bank_name || 'Span Bank'}`
-            : 'Setting up your account...'}
+          {wallet?.account_number ? `${wallet.account_number} · ${wallet.bank_name || 'Span Bank'}` : 'Setting up your account...'}
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
-            Health Savings
-          </div>
-          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>
-            Active
-          </div>
+          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>Health Savings</div>
+          <div style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.1)', borderRadius: 20, fontSize: 11, color: 'rgba(255,255,255,0.75)', fontFamily: "'Manrope',sans-serif" }}>Active</div>
         </div>
         <div className="wallet-actions">
-          <button className="wallet-btn wallet-btn-primary" onClick={() => setShowFund(true)}>
-            Fund Wallet
-          </button>
-          <button className="wallet-btn wallet-btn-outline" onClick={() => setShowStatement(true)}>
-            Statement
-          </button>
+          <button className="wallet-btn wallet-btn-primary" onClick={() => setShowFund(true)}>Fund Wallet</button>
+          <button className="wallet-btn wallet-btn-outline" onClick={() => setShowStatement(true)}>Statement</button>
         </div>
       </div>
 
-      {/* Notice banner */}
       <div style={{ background: '#e8f6f9', border: '1.5px solid #98B7B9', borderRadius: 12, padding: '14px 18px', marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ fontSize: 11, fontWeight: 800, color: '#2d8a9e', background: '#b0cccf', padding: '3px 8px', borderRadius: 6, fontFamily: "'Montserrat',sans-serif", flexShrink: 0, marginTop: 1 }}>INFO</div>
         <div style={{ fontSize: 13, color: '#1a2f42', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
@@ -1167,23 +1234,18 @@ function WalletPage({ userId }) {
         </div>
       </div>
 
-      {/* Transaction history */}
       <div className="card">
         <div className="card-title" style={{ marginBottom: 18 }}>Transaction History</div>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>
-            Loading transactions...
-          </div>
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--slate)', fontSize: 13, fontFamily: "'Manrope',sans-serif" }}>Loading transactions...</div>
         ) : transactions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 20px' }}>
             <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--primary-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 11, color: 'var(--primary)', margin: '0 auto 14px', fontFamily: "'Montserrat',sans-serif" }}>EMPTY</div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>No transactions yet</div>
             <div style={{ fontSize: 13, color: 'var(--slate)', marginTop: 6, fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
-              Fund your wallet by transferring to your dedicated account.<br />Your balance will update automatically once payment is confirmed.
+              Fund your wallet by transferring to your dedicated account.
             </div>
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 16, width: 'auto' }} onClick={() => setShowFund(true)}>
-              View Account Details
-            </button>
+            <button className="btn btn-primary btn-sm" style={{ marginTop: 16, width: 'auto' }} onClick={() => setShowFund(true)}>View Account Details</button>
           </div>
         ) : (
           <div className="txn-list">
@@ -1191,20 +1253,14 @@ function WalletPage({ userId }) {
               const style = getTxnStyle(t);
               return (
                 <div key={t.id} className="txn-item">
-                  <div className="txn-icon" style={{ background: style.bg, color: style.color }}>
-                    {style.label}
-                  </div>
+                  <div className="txn-icon" style={{ background: style.bg, color: style.color }}>{style.label}</div>
                   <div className="txn-info">
-                    <div className="txn-name">{t.description || 'Transaction'}</div>
+                    <div className="txn-name">{t.name || t.description || 'Transaction'}</div>
                     <div className="txn-date">{formatTxnDate(t.created_at)}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div className={`txn-amount ${t.type}`}>
-                      {t.type === 'credit' ? '+' : '-'}N{Number(t.amount).toLocaleString()}
-                    </div>
-                    <span className={`badge ${t.type === 'credit' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10, marginTop: 3 }}>
-                      {t.type}
-                    </span>
+                    <div className={`txn-amount ${t.type}`}>{t.type === 'credit' ? '+' : '-'}N{Number(t.amount).toLocaleString()}</div>
+                    <span className={`badge ${t.type === 'credit' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10, marginTop: 3 }}>{t.type}</span>
                   </div>
                 </div>
               );
@@ -1213,7 +1269,7 @@ function WalletPage({ userId }) {
         )}
       </div>
 
-      {/* Fund Wallet Modal — shows DVA account details */}
+      {/* Fund Wallet Modal */}
       {showFund && (
         <div className="modal-overlay" onClick={() => setShowFund(false)}>
           <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
@@ -1223,54 +1279,33 @@ function WalletPage({ userId }) {
             </div>
             <div className="modal-body">
               <div style={{ background: 'var(--primary-pale)', border: '1.5px solid var(--secondary)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 16, fontFamily: "'Montserrat',sans-serif" }}>
-                  Your Dedicated Account Details
-                </div>
-
-                {/* Bank Name */}
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 16, fontFamily: "'Montserrat',sans-serif" }}>Your Dedicated Account Details</div>
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Bank Name</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>
-                    {wallet?.bank_name || 'Wema Bank'}
-                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>{wallet?.bank_name || 'Wema Bank'}</div>
                 </div>
-
-                {/* Account Number */}
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Account Number</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', letterSpacing: 2, fontFamily: "'Montserrat',sans-serif" }}>
-                      {wallet?.account_number || 'Pending setup'}
-                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', letterSpacing: 2, fontFamily: "'Montserrat',sans-serif" }}>{wallet?.account_number || 'Pending setup'}</div>
                     {wallet?.account_number && (
-                      <button
-                        onClick={() => copyToClipboard(wallet.account_number)}
-                        style={{ padding: '6px 14px', borderRadius: 8, border: '1.5px solid var(--primary)', background: copied ? 'var(--primary)' : 'white', color: copied ? 'white' : 'var(--primary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Montserrat',sans-serif", transition: 'all 0.2s' }}
-                      >
+                      <button onClick={() => copyToClipboard(wallet.account_number)} style={{ padding: '6px 14px', borderRadius: 8, border: '1.5px solid var(--primary)', background: copied ? 'var(--primary)' : 'white', color: copied ? 'white' : 'var(--primary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Montserrat',sans-serif" }}>
                         {copied ? 'Copied!' : 'Copy'}
                       </button>
                     )}
                   </div>
                 </div>
-
-                {/* Account Name */}
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--slate)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Montserrat',sans-serif" }}>Account Name</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>
-                    {wallet?.account_name || 'Span Healthcare'}
-                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)', marginTop: 4, fontFamily: "'Manrope',sans-serif" }}>{wallet?.account_name || 'Span Healthcare'}</div>
                 </div>
               </div>
-
               <div style={{ background: '#fef9c3', border: '1.5px solid #e8a444', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
                 <div style={{ fontSize: 12, color: '#854d0e', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
                   <strong>How to fund:</strong> Transfer any amount to the account details above from any Nigerian bank. Your wallet balance will be updated automatically within a few minutes of payment confirmation.
                 </div>
               </div>
-
-              <button className="btn btn-primary" onClick={() => setShowFund(false)}>
-                Done
-              </button>
+              <button className="btn btn-primary" onClick={() => setShowFund(false)}>Done</button>
             </div>
           </div>
         </div>
@@ -1287,21 +1322,29 @@ function WalletPage({ userId }) {
             <div className="modal-body">
               <div className="form-group">
                 <label className="form-label">From Date</label>
-                <input className="form-input" type="date" />
+                <input className="form-input" type="date" value={stmtFrom} onChange={e => setStmtFrom(e.target.value)} />
               </div>
               <div className="form-group">
                 <label className="form-label">To Date</label>
-                <input className="form-input" type="date" />
+                <input className="form-input" type="date" value={stmtTo} onChange={e => setStmtTo(e.target.value)} />
               </div>
               <div className="form-group">
                 <label className="form-label">Format</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   {['PDF', 'Excel'].map(f => (
-                    <div key={f} style={{ border: '1.5px solid #dce8eb', borderRadius: 10, padding: 14, textAlign: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}>{f}</div>
+                    <div
+                      key={f}
+                      onClick={() => setStmtFormat(f)}
+                      style={{ border: `1.5px solid ${stmtFormat === f ? 'var(--primary)' : '#dce8eb'}`, background: stmtFormat === f ? 'var(--primary-pale)' : 'white', borderRadius: 10, padding: 14, textAlign: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: stmtFormat === f ? 'var(--primary)' : 'var(--navy)', fontFamily: "'Manrope',sans-serif" }}
+                    >
+                      {f}
+                    </div>
                   ))}
                 </div>
               </div>
-              <button className="btn btn-primary">Download Statement</button>
+              <button className="btn btn-primary" onClick={() => stmtFormat === 'PDF' ? downloadPDF() : downloadExcel()}>
+                Download Statement
+              </button>
             </div>
           </div>
         </div>
@@ -1309,6 +1352,7 @@ function WalletPage({ userId }) {
     </div>
   );
 }
+
 
 function ProfilePage({ userId }) {
   const [editing, setEditing] = useState(false);
@@ -1400,10 +1444,6 @@ function ProfilePage({ userId }) {
                 <span className="profile-tag" style={{ background: "#dcfce7", color: "var(--success)" }}>Active</span>
               </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: "var(--slate)", fontFamily: "'Manrope',sans-serif" }}>Health Score</div>
-              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: "var(--primary)" }}>82</div>
-            </div>
           </div>
         </div>
       </div>
@@ -1413,31 +1453,83 @@ function ProfilePage({ userId }) {
           <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={profile?.full_name || ''} disabled={!editing} onChange={e => setProfile({...profile, full_name: e.target.value})} /></div>
           <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" value={profile?.phone || ''} disabled={!editing} onChange={e => setProfile({...profile, phone: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" defaultValue="1989-05-14" disabled={!editing} /></div>
-            <div className="form-group"><label className="form-label">Sex</label><select className="form-select" disabled={!editing}><option>Male</option><option>Female</option></select></div>
+          <div className="form-group"><label className="form-label">Date of Birth</label><input className="form-input" type="date" value={profile?.date_of_birth || ''} disabled={!editing} onChange={e => setProfile({ ...profile, date_of_birth: e.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Sex</label><select className="form-select" disabled={!editing} value={profile?.sex || 'Male'} onChange={e => setProfile({ ...profile, sex: e.target.value })}><option>Male</option><option>Female</option></select></div>
           </div>
         </div>
         <div className="card">
           <div className="card-title" style={{ marginBottom: 18 }}>Medical Information</div>
           <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Blood Group</label><select className="form-select" disabled={!editing}>{["A+","A-","B+","B-","O+","O-","AB+","AB-"].map(b => <option key={b}>{b}</option>)}</select></div>
-            <div className="form-group"><label className="form-label">Genotype</label><select className="form-select" disabled={!editing}>{["AA","AS","SS","AC","SC"].map(g => <option key={g}>{g}</option>)}</select></div>
-            <div className="form-group"><label className="form-label">Height</label><input className="form-input" defaultValue="175cm" disabled={!editing} /></div>
-            <div className="form-group"><label className="form-label">Weight</label><input className="form-input" defaultValue="78kg" disabled={!editing} /></div>
-            <div className="form-group" style={{ gridColumn: "1/-1" }}><label className="form-label">Known Allergies</label><input className="form-input" defaultValue="None known" disabled={!editing} /></div>
-            <div className="form-group" style={{ gridColumn: "1/-1" }}><label className="form-label">Chronic Conditions</label><input className="form-input" defaultValue="None" disabled={!editing} /></div>
-            <div className="form-group" style={{ gridColumn: "1/-1" }}><label className="form-label">Current Medications</label><input className="form-input" defaultValue="None" disabled={!editing} /></div>
+            <div className="form-group">
+              <label className="form-label">Blood Group</label>
+              <select className="form-select" disabled={!editing} value={profile?.blood_group || 'O+'} onChange={e => setProfile({ ...profile, blood_group: e.target.value })}>
+                {["A+","A-","B+","B-","O+","O-","AB+","AB-"].map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Genotype</label>
+              <select className="form-select" disabled={!editing} value={profile?.genotype || 'AA'} onChange={e => setProfile({ ...profile, genotype: e.target.value })}>
+                {["AA","AS","SS","AC","SC"].map(g => <option key={g}>{g}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Height (cm)</label>
+              <input className="form-input" value={profile?.height || ''} disabled={!editing} placeholder="e.g. 175" onChange={e => setProfile({ ...profile, height: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Weight (kg)</label>
+              <input className="form-input" value={profile?.weight || ''} disabled={!editing} placeholder="e.g. 78" onChange={e => setProfile({ ...profile, weight: e.target.value })} />
+            </div>
+            <div className="form-group" style={{ gridColumn: "1/-1" }}>
+              <label className="form-label">Known Allergies</label>
+              <input className="form-input" value={profile?.allergies || ''} disabled={!editing} placeholder="e.g. Penicillin or None" onChange={e => setProfile({ ...profile, allergies: e.target.value })} />
+            </div>
+            <div className="form-group" style={{ gridColumn: "1/-1" }}>
+              <label className="form-label">Chronic Conditions</label>
+              <input className="form-input" value={profile?.chronic_conditions || ''} disabled={!editing} placeholder="e.g. Diabetes or None" onChange={e => setProfile({ ...profile, chronic_conditions: e.target.value })} />
+            </div>
+            <div className="form-group" style={{ gridColumn: "1/-1" }}>
+              <label className="form-label">Current Medications</label>
+              <input className="form-input" value={profile?.current_medications || ''} disabled={!editing} placeholder="e.g. Metformin or None" onChange={e => setProfile({ ...profile, current_medications: e.target.value })} />
+            </div>
           </div>
         </div>
       </div>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 18 }}>Emergency Contact</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
-          {[{ label: "Full Name", value: "Mrs. Grace Okafor" }, { label: "Relationship", value: "Spouse" }, { label: "Phone Number", value: "+234 805 123 4567" }].map(f => (
-            <div key={f.label} className="form-group"><label className="form-label">{f.label}</label><input className="form-input" defaultValue={f.value} disabled={!editing} /></div>
-          ))}
-        </div>
-      </div>
+  <div className="card-title" style={{ marginBottom: 18 }}>Emergency Contact</div>
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
+    <div className="form-group">
+      <label className="form-label">Full Name</label>
+      <input
+        className="form-input"
+        value={profile?.emergency_contact_name || ''}
+onChange={e => setProfile({ ...profile, emergency_contact_name: e.target.value })}
+        disabled={!editing}
+        placeholder="Emergency contact name"
+      />
+    </div>
+    <div className="form-group">
+      <label className="form-label">Relationship</label>
+      <input
+        className="form-input"
+        value={profile?.emergency_contact_relation || ''}
+onChange={e => setProfile({ ...profile, emergency_contact_relation: e.target.value })}
+        disabled={!editing}
+        placeholder="e.g. Spouse, Parent"
+      />
+    </div>
+    <div className="form-group">
+      <label className="form-label">Phone Number</label>
+      <input
+        className="form-input"
+        value={profile?.emergency_contact_phone || ''}
+        onChange={e => setProfile({ ...profile, emergency_contact_phone: e.target.value })}
+        disabled={!editing}
+        placeholder="+234 800 000 0000"
+      />
+    </div>
+  </div>
+</div>
       {showID && (
         <div className="modal-overlay" onClick={() => setShowID(false)}>
           <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
@@ -1449,14 +1541,14 @@ function ProfilePage({ userId }) {
                   <div className="id-card-type">Member Card</div>
                 </div>
                 <div className="id-card-body">
-                  <div className="id-card-photo">{photo ? <img src={photo} alt="profile" /> : "EO"}</div>
+                  <div className="id-card-photo">{photo ? <img src={photo} alt="profile" /> : (profile?.full_name?.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase() || 'SP')}</div>
                   <div>
-                    <div className="id-card-name">Emeka Okafor</div>
+                    <div className="id-card-name">{profile?.full_name || 'Member'}</div>
                     <div className="id-card-id">{spanID}</div>
                     <div className="id-card-details">
-                      <div><div className="id-card-detail-label">Blood Group</div><div className="id-card-detail-value">O+</div></div>
-                      <div><div className="id-card-detail-label">Genotype</div><div className="id-card-detail-value">AA</div></div>
-                      <div><div className="id-card-detail-label">Member Since</div><div className="id-card-detail-value">Jan 2025</div></div>
+                      <div><div className="id-card-detail-label">Blood Group</div><div className="id-card-detail-value">{profile?.blood_group || '—'}</div></div>
+                      <div><div className="id-card-detail-label">Genotype</div><div className="id-card-detail-value">{profile?.genotype || '—'}</div></div>
+                      <div><div className="id-card-detail-label">Member Since</div><div className="id-card-detail-value">{profile?.created_at ? new Date(profile.created_at).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' }) : 'Jan 2025'}</div></div>
                       <div><div className="id-card-detail-label">Status</div><div className="id-card-detail-value">Active</div></div>
                     </div>
                   </div>
@@ -1466,7 +1558,16 @@ function ProfilePage({ userId }) {
                   <div className="id-card-valid"><div>Valid Through</div><div style={{ fontWeight: 700, fontSize: 11 }}>Dec 2026</div></div>
                 </div>
               </div>
-              <button className="btn btn-primary" style={{ width: "100%" }}>Download ID Card</button>
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={async () => {
+                const { default: html2canvas } = await import('html2canvas');
+                const card = document.querySelector('.id-card');
+                if (!card) return;
+                const canvas = await html2canvas(card, { scale: 2, useCORS: true });
+                const link = document.createElement('a');
+                link.download = `SpanHC_ID_${profile?.full_name?.replace(/\s+/g, '_') || 'Card'}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+              }}>Download ID Card</button>
             </div>
           </div>
         </div>
@@ -1992,7 +2093,7 @@ function DoctorProfilePage({ profile, setProfile }) {
                 {profile?.status === 'approved' ? 'Approved' : 'Pending Approval'}
               </span>
               <span className="badge badge-info">{form.experience_years} years experience</span>
-              <span className="badge badge-info">N1,000 per consultation</span>
+              <span className="badge badge-info">N1,500 per consultation</span>
             </div>
           </div>
         </div>
@@ -2069,7 +2170,7 @@ function DoctorProfilePage({ profile, setProfile }) {
           </div>
           <div className="form-group">
             <label className="form-label">Consultation Fee</label>
-            <input className="form-input" value="N1,000 (Flat Rate — set by platform)" disabled />
+            <input className="form-input" value="N1,500 per session (Platform managed)" disabled />
           </div>
           <div style={{ background: 'var(--primary-pale)', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: 'var(--primary-dark)', fontFamily: "'Manrope',sans-serif", lineHeight: 1.7 }}>
             Your profile is visible to all patients on the platform. Keep your bio professional and up to date.
@@ -2086,6 +2187,12 @@ function DoctorMessagesPage({ doctorUserId, doctorName }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const deleteMessage = async (msgId) => {
+    await supabase.from('messages').delete().eq('id', msgId);
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    setMsgMenuId(null);
+  };
+  const [msgMenuId, setMsgMenuId] = useState(null);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef();
   const chatFileRef = useRef();
@@ -2286,8 +2393,52 @@ function DoctorMessagesPage({ doctorUserId, doctorName }) {
                   const isMe = msg.sender_id === doctorUserId;
                   return (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ maxWidth: '70%', padding: '10px 14px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'var(--primary)' : '#f1f5f9', color: isMe ? 'white' : 'var(--navy)', fontSize: 13, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6 }}>
-                        {msg.content}
+                      <div style={{ maxWidth: '70%', position: 'relative' }}
+                        onMouseEnter={e => { const btn = e.currentTarget.querySelector('.msg-menu-btn'); if (btn) btn.style.opacity = '1'; }}
+                        onMouseLeave={e => { const btn = e.currentTarget.querySelector('.msg-menu-btn'); if (btn) btn.style.opacity = '0'; }}
+                      >
+                        <button
+                          className="msg-menu-btn"
+                          onClick={() => setMsgMenuId(msgMenuId === msg.id ? null : msg.id)}
+                          style={{ position: 'absolute', top: -8, [isMe ? 'left' : 'right']: -28, opacity: 0, transition: 'opacity 0.2s', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--slate)', padding: 4, borderRadius: 6, zIndex: 10 }}
+                        >
+                          ⋮
+                        </button>
+                        {msgMenuId === msg.id && (
+                          <div style={{ position: 'absolute', top: 0, [isMe ? 'left' : 'right']: -110, background: 'white', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100, minWidth: 100, overflow: 'hidden' }}>
+                            <div
+                              onClick={() => deleteMessage(msg.id)}
+                              style={{ padding: '10px 16px', fontSize: 13, color: 'var(--danger)', fontFamily: "'Manrope',sans-serif", fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                              onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                            >
+                              🗑 Delete
+                            </div>
+                          </div>
+                        )}
+                        <div style={{
+                          padding: msg.file_url && !msg.content ? '6px 10px' : '10px 14px',
+                          borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                          background: isMe ? 'var(--primary)' : '#f1f5f9',
+                          color: isMe ? 'white' : 'var(--navy)',
+                          fontSize: 13,
+                          fontFamily: "'Manrope',sans-serif",
+                          lineHeight: 1.6,
+                        }}>
+                          {msg.file_url && (
+                            msg.file_type?.includes('image') ? (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer">
+                                <img src={msg.file_url} alt={msg.file_name} style={{ maxWidth: 200, maxHeight: 160, borderRadius: 8, display: 'block' }} />
+                              </a>
+                            ) : (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, color: isMe ? 'white' : 'var(--primary)', textDecoration: 'none', fontWeight: 600, fontSize: 12 }}>
+                                <span style={{ background: isMe ? 'rgba(255,255,255,0.2)' : 'var(--primary-pale)', padding: '3px 7px', borderRadius: 5, fontSize: 10, fontWeight: 800 }}>PDF</span>
+                                {msg.file_name}
+                              </a>
+                            )
+                          )}
+                          {msg.content && <div>{msg.content}</div>}
+                        </div>
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
                         {formatMsgTime(msg.created_at)}
@@ -2571,8 +2722,8 @@ console.log('doctorProfile received:', doctorProfile);
               <div className="stat-card">
                 <span className="stat-tag" style={{ background: '#fef9c3', color: '#854d0e' }}>FEE</span>
                 <div className="stat-value" style={{ marginTop: 6 }}>N1,000</div>
-                <div className="stat-label">Per Consultation</div>
-                <div className="stat-change up">Flat rate fee</div>
+                <div className="stat-label">Your Earnings</div>
+                <div className="stat-change up">Per consultation</div>
               </div>
             </div>
 
@@ -2743,6 +2894,10 @@ function DependentsPage({ userId }) {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editDep, setEditDep] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const editFileRef = useRef();
   const [newDep, setNewDep] = useState({
     full_name: '', relation: 'Spouse', sex: 'Male',
     date_of_birth: '', blood_group: 'O+', genotype: 'AA',
@@ -2804,6 +2959,41 @@ function DependentsPage({ userId }) {
     setSaving(false);
   };
 
+  const saveEdit = async () => {
+    if (!editDep) return;
+    setEditSaving(true);
+    try {
+      let avatar_url = editDep.avatar_url;
+      if (editDep._newPhoto) {
+        const ext = editDep._newPhoto.name.split('.').pop();
+        const path = `dependents/${editDep.id}/${Date.now()}.${ext}`;
+        await supabase.storage.from('documents').upload(path, editDep._newPhoto, { upsert: true });
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path);
+        avatar_url = urlData.publicUrl;
+      }
+      const { error } = await supabase.from('dependents').update({
+        full_name: editDep.full_name,
+        relation: editDep.relation,
+        sex: editDep.sex,
+        date_of_birth: editDep.date_of_birth,
+        blood_group: editDep.blood_group,
+        genotype: editDep.genotype,
+        weight: editDep.weight,
+        height: editDep.height,
+        allergies: editDep.allergies,
+        avatar_url,
+      }).eq('id', editDep.id);
+      if (!error) {
+        setDependents(dependents.map(d => d.id === editDep.id ? { ...editDep, avatar_url } : d));
+        setShowEdit(false);
+        setEditDep(null);
+      }
+    } catch(e) {
+      console.error('Edit error:', e);
+    }
+    setEditSaving(false);
+  };
+
   const deleteDependent = async (id) => {
     if (!window.confirm('Remove this dependent?')) return;
     await supabase.from('dependents').delete().eq('id', id);
@@ -2826,7 +3016,11 @@ function DependentsPage({ userId }) {
         <div className="dependents-grid">
           {dependents.map(dep => (
             <div key={dep.id} className="dependent-card">
-              <div className="dependent-avatar">{getInitials(dep.full_name)}</div>
+              <div className="dependent-avatar" style={{ overflow: 'hidden' }}>
+                {dep.avatar_url
+                  ? <img src={dep.avatar_url} alt={dep.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : getInitials(dep.full_name)}
+              </div>
               <div className="dependent-name">{dep.full_name}</div>
               <div className="dependent-id">{dep.dependent_id || dep.id?.slice(0, 8).toUpperCase()}</div>
               <span className="badge badge-info" style={{ marginTop: 5 }}>{dep.relation}</span>
@@ -2851,7 +3045,7 @@ function DependentsPage({ userId }) {
                 </div>
               )}
               <div style={{ display: 'flex', gap: 7, marginTop: 14 }}>
-                <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>Edit</button>
+                <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => { setEditDep(dep); setShowEdit(true); }}>Edit</button>
                 <button
                   className="btn btn-sm"
                   style={{ background: '#fee2e2', color: 'var(--danger)', flex: 1, border: 'none' }}
@@ -2874,6 +3068,7 @@ function DependentsPage({ userId }) {
         </div>
       )}
 
+      {/* Add Modal */}
       {showAdd && (
         <div className="modal-overlay" onClick={() => setShowAdd(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -2941,6 +3136,91 @@ function DependentsPage({ userId }) {
           </div>
         </div>
       )}
+
+      {/* Edit Modal */}
+      {showEdit && editDep && (
+        <div className="modal-overlay" onClick={() => setShowEdit(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Edit Dependent</div>
+              <button className="modal-close" onClick={() => setShowEdit(false)}>X</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
+                <div
+                  onClick={() => editFileRef.current.click()}
+                  style={{ width: 80, height: 80, borderRadius: 20, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800, color: 'white', fontFamily: "'Montserrat',sans-serif", cursor: 'pointer', overflow: 'hidden', position: 'relative' }}
+                >
+                  {editDep.avatar_url
+                    ? <img src={editDep.avatar_url} alt={editDep.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : getInitials(editDep.full_name)}
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'white', fontFamily: "'Manrope',sans-serif" }}>Change</div>
+                </div>
+                <input ref={editFileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => setEditDep({ ...editDep, avatar_url: ev.target.result, _newPhoto: file });
+                  reader.readAsDataURL(file);
+                }} />
+                <div style={{ fontSize: 11, color: 'var(--slate)', marginTop: 6, fontFamily: "'Manrope',sans-serif" }}>Click photo to change</div>
+              </div>
+              <div className="form-grid-2">
+                <div className="form-group" style={{ gridColumn: '1/-1' }}>
+                  <label className="form-label">Full Name</label>
+                  <input className="form-input" value={editDep.full_name || ''} onChange={e => setEditDep({ ...editDep, full_name: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Relationship</label>
+                  <select className="form-select" value={editDep.relation || 'Spouse'} onChange={e => setEditDep({ ...editDep, relation: e.target.value })}>
+                    {['Spouse', 'Son', 'Daughter', 'Parent', 'Sibling', 'Other'].map(r => <option key={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Sex</label>
+                  <select className="form-select" value={editDep.sex || 'Male'} onChange={e => setEditDep({ ...editDep, sex: e.target.value })}>
+                    <option>Male</option><option>Female</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date of Birth</label>
+                  <input className="form-input" type="date" value={editDep.date_of_birth || ''} onChange={e => setEditDep({ ...editDep, date_of_birth: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Blood Group</label>
+                  <select className="form-select" value={editDep.blood_group || 'O+'} onChange={e => setEditDep({ ...editDep, blood_group: e.target.value })}>
+                    {['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map(b => <option key={b}>{b}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Genotype</label>
+                  <select className="form-select" value={editDep.genotype || 'AA'} onChange={e => setEditDep({ ...editDep, genotype: e.target.value })}>
+                    {['AA', 'AS', 'SS', 'AC', 'SC'].map(g => <option key={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Height (cm)</label>
+                  <input className="form-input" placeholder="e.g. 170" value={editDep.height || ''} onChange={e => setEditDep({ ...editDep, height: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Weight (kg)</label>
+                  <input className="form-input" placeholder="e.g. 65" value={editDep.weight || ''} onChange={e => setEditDep({ ...editDep, weight: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ gridColumn: '1/-1' }}>
+                  <label className="form-label">Known Allergies</label>
+                  <input className="form-input" placeholder="e.g. Penicillin or None" value={editDep.allergies || ''} onChange={e => setEditDep({ ...editDep, allergies: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowEdit(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={saveEdit} disabled={editSaving}>
+                  {editSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2952,6 +3232,12 @@ function MessagesPage({ userId, userName }) {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [msgMenuId, setMsgMenuId] = useState(null);
+  const deleteMessage = async (msgId) => {
+    await supabase.from('messages').delete().eq('id', msgId);
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    setMsgMenuId(null);
+  };
   const [unreadCounts, setUnreadCounts] = useState({});
   const messagesEndRef = useRef();
   const chatFileRef = useRef();
@@ -3155,40 +3441,52 @@ function MessagesPage({ userId, userName }) {
                   const isMe = msg.sender_id === userId;
                   return (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ maxWidth: '70%' }}>
-                        {msg.file_url && (
-                          <div style={{ marginBottom: msg.content ? 6 : 0 }}>
-                            {msg.file_type && msg.file_type.includes('image') ? (
-                              <img src={msg.file_url} alt={msg.file_name} style={{ maxWidth: 220, borderRadius: 10, display: 'block' }} />
-                            ) : (
-                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', maxWidth: 220 }}>
-                                <div style={{ border: `1.5px solid ${isMe ? 'rgba(255,255,255,0.3)' : '#dce8eb'}`, borderRadius: 12, overflow: 'hidden', background: isMe ? 'rgba(255,255,255,0.1)' : 'white' }}>
-                                  <div style={{ background: isMe ? 'rgba(255,255,255,0.15)' : '#f1f5f9', padding: '20px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
-                                    <div style={{ width: 44, height: 56, background: isMe ? 'rgba(255,255,255,0.9)' : 'white', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.12)', flexDirection: 'column', gap: 3 }}>
-                                      <div style={{ width: 24, height: 3, background: '#dce8eb', borderRadius: 2 }} />
-                                      <div style={{ width: 24, height: 3, background: '#dce8eb', borderRadius: 2 }} />
-                                      <div style={{ width: 16, height: 3, background: '#dce8eb', borderRadius: 2 }} />
-                                      <div style={{ fontSize: 8, fontWeight: 800, color: 'var(--danger)', fontFamily: "'Montserrat',sans-serif", marginTop: 2 }}>PDF</div>
-                                    </div>
-                                  </div>
-                                  <div style={{ padding: '8px 12px', borderTop: `1px solid ${isMe ? 'rgba(255,255,255,0.2)' : '#eef2f5'}` }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: isMe ? 'white' : 'var(--navy)', fontFamily: "'Manrope',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
-                                      {msg.file_name}
-                                    </div>
-                                    <div style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : 'var(--slate)', fontFamily: "'Manrope',sans-serif", marginTop: 2 }}>
-                                      Click to open
-                                    </div>
-                                  </div>
-                                </div>
+                      <div style={{ maxWidth: '70%', position: 'relative' }}
+                        onMouseEnter={e => { const btn = e.currentTarget.querySelector('.msg-menu-btn'); if (btn) btn.style.opacity = '1'; }}
+                        onMouseLeave={e => { const btn = e.currentTarget.querySelector('.msg-menu-btn'); if (btn) btn.style.opacity = '0'; }}
+                      >
+                        <button
+                          className="msg-menu-btn"
+                          onClick={() => setMsgMenuId(msgMenuId === msg.id ? null : msg.id)}
+                          style={{ position: 'absolute', top: -8, [isMe ? 'left' : 'right']: -28, opacity: 0, transition: 'opacity 0.2s', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--slate)', padding: 4, borderRadius: 6, zIndex: 10 }}
+                        >
+                          ⋮
+                        </button>
+                        {msgMenuId === msg.id && (
+                          <div style={{ position: 'absolute', top: 0, [isMe ? 'left' : 'right']: -110, background: 'white', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100, minWidth: 100, overflow: 'hidden' }}>
+                            <div
+                              onClick={() => deleteMessage(msg.id)}
+                              style={{ padding: '10px 16px', fontSize: 13, color: 'var(--danger)', fontFamily: "'Manrope',sans-serif", fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                              onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                            >
+                              🗑 Delete
+                            </div>
+                          </div>
+                        )}
+                        <div style={{
+                          padding: msg.file_url && !msg.content ? '6px 10px' : '10px 14px',
+                          borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                          background: isMe ? 'var(--primary)' : '#f1f5f9',
+                          color: isMe ? 'white' : 'var(--navy)',
+                          fontSize: 13,
+                          fontFamily: "'Manrope',sans-serif",
+                          lineHeight: 1.5,
+                        }}>
+                          {msg.file_url && (
+                            msg.file_type?.includes('image') ? (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer">
+                                <img src={msg.file_url} alt={msg.file_name} style={{ maxWidth: 200, maxHeight: 160, borderRadius: 8, display: 'block' }} />
                               </a>
-                            )}
-                          </div>
-                        )}
-                        {msg.content && (
-                          <div style={{ padding: '10px 14px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'var(--primary)' : '#f1f5f9', color: isMe ? 'white' : 'var(--navy)', fontSize: 13, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6 }}>
-                            {msg.content}
-                          </div>
-                        )}
+                            ) : (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, color: isMe ? 'white' : 'var(--primary)', textDecoration: 'none', fontWeight: 600, fontSize: 12 }}>
+                                <span style={{ background: isMe ? 'rgba(255,255,255,0.2)' : 'var(--primary-pale)', padding: '3px 7px', borderRadius: 5, fontSize: 10, fontWeight: 800 }}>PDF</span>
+                                {msg.file_name}
+                              </a>
+                            )
+                          )}
+                          {msg.content && <div>{msg.content}</div>}
+                        </div>
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--slate)', marginTop: 3, fontFamily: "'Manrope',sans-serif" }}>
                         {formatMsgTime(msg.created_at)}
@@ -3359,7 +3657,7 @@ function TelemedicinePage({ userId, userName }) {
     setBookingError('');
 
     if (!wallet || Number(wallet.balance) < 1000) {
-      setBookingError('Insufficient balance. Please fund your wallet with at least N1,000 to book a consultation.');
+      setBookingError('Insufficient balance. Please fund your wallet with at least N1,500 to book a consultation.');
       return;
     }
     if (!selectedDate || !selectedTime) {
@@ -3390,7 +3688,7 @@ function TelemedicinePage({ userId, userName }) {
       const { data: deductResult, error: deductError } = await supabase
   .rpc('deduct_wallet_and_record', {
     p_user_id: userId,
-    p_amount: 1000,
+    p_amount: 1500,
     p_name: `Consultation fee — ${selectedDoctor.full_name}`,
   });
 if (deductError) throw deductError;
@@ -3403,7 +3701,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
       setSelectedDate('');
       setSelectedTime('');
       setReason('');
-      alert(`Booking confirmed! Your appointment with ${selectedDoctor.full_name} is scheduled for ${selectedDate} at ${selectedTime}. N1,000 has been deducted from your wallet.`);
+      alert(`Booking confirmed! Your appointment with ${selectedDoctor.full_name} is scheduled for ${selectedDate} at ${selectedTime}. N1,500 has been deducted from your wallet.`);
 
     } catch (e) {
       setBookingError(e.message);
@@ -3413,7 +3711,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
 
   const startCall = async (doctor, type) => {
     if (!wallet || Number(wallet.balance) < 1000) {
-      alert('Insufficient balance. Please fund your wallet with at least N1,000 to start a consultation.');
+      alert('Insufficient balance. Please fund your wallet with at least N1,500 to start a consultation.');
       return;
     }
 
@@ -3470,7 +3768,7 @@ await client.join(AGORA_APP_ID, channel, token, userId);
       const { data: deductResult, error: deductError } = await supabase
   .rpc('deduct_wallet_and_record', {
     p_user_id: userId,
-    p_amount: 1000,
+    p_amount: 1500,
     p_name: `${type === 'video' ? 'Video' : 'Audio'} consultation — ${doctor.full_name}`,
   });
 if (deductError) throw deductError;
@@ -3513,7 +3811,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
       <div className="topbar">
         <div>
           <div className="page-title">Telemedicine</div>
-          <div className="page-sub">Consult with qualified doctors from anywhere — N1,000 flat rate</div>
+          <div className="page-sub">Consult with qualified doctors from anywhere — N1,500 flat rate</div>
         </div>
         <div style={{ display: 'flex', gap: 7 }}>
           {['all', 'online', 'offline'].map(f => (
@@ -3527,7 +3825,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
       {/* Wallet balance warning */}
       {wallet && Number(wallet.balance) < 1000 && (
         <div style={{ background: '#fee2e2', border: '1.5px solid var(--danger)', borderRadius: 12, padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#991b1b', fontFamily: "'Manrope',sans-serif" }}>
-          <strong>Low balance:</strong> Your wallet balance is insufficient for a consultation. Please fund your wallet with at least N1,000 to book or start a call.
+          <strong>Low balance:</strong> Your wallet balance is insufficient for a consultation. Please fund your wallet with at least N1,500 to book or start a call.
         </div>
       )}
 
@@ -3547,7 +3845,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
         </div>
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18 }}>
           <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--warning)' }}>
-            N1,000
+            N1,500
           </div>
           <div style={{ fontSize: 12, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>Flat Rate Per Session</div>
         </div>
@@ -3583,7 +3881,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
                 <span style={{ color: doc.is_available ? 'var(--success)' : 'var(--slate-light)' }}>
                   {doc.is_available ? 'Available' : 'Unavailable'}
                 </span>
-                <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--navy)' }}>N1,000</span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 800, fontFamily: "'Montserrat',sans-serif", color: 'var(--navy)' }}></span>
               </div>
               {doc.bio && (
                 <div style={{ fontSize: 12, color: 'var(--slate)', marginBottom: 10, fontFamily: "'Manrope',sans-serif", lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -3635,7 +3933,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
                   <div style={{ color: 'var(--primary)', fontSize: 13, fontWeight: 600, fontFamily: "'Manrope',sans-serif" }}>{selectedDoctor.specialty}</div>
                 </div>
                 <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>N1,000</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>N1,500</div>
                   <div style={{ fontSize: 11, color: 'var(--slate)', fontFamily: "'Manrope',sans-serif" }}>consultation fee</div>
                 </div>
               </div>
@@ -3714,7 +4012,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
                       <div>Date: <strong>{selectedDate}</strong></div>
                       <div>Time: <strong>{selectedTime}</strong></div>
                       <div>Type: <strong>{consultationType}</strong></div>
-                      <div>Fee: <strong style={{ color: 'var(--danger)' }}>N1,000</strong> will be deducted from wallet</div>
+                      <div>Fee: <strong style={{ color: 'var(--danger)' }}>N1,500</strong> will be deducted from wallet</div>
                       <div>Wallet Balance After: <strong style={{ color: wallet && Number(wallet.balance) >= 1000 ? 'var(--success)' : 'var(--danger)' }}>
                         N{wallet ? (Number(wallet.balance) - 1000).toLocaleString() : '0'}
                       </strong></div>
@@ -3730,7 +4028,7 @@ setWallet({ ...wallet, balance: deductResult.new_balance });
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setBookingStep(1)}>Back</button>
                     <button className="btn btn-primary" style={{ flex: 2 }} onClick={confirmBooking} disabled={booking}>
-                      {booking ? 'Confirming...' : 'Confirm Booking — N1,000'}
+                      {booking ? 'Confirming...' : 'Confirm Booking — N1,500'}
                     </button>
                   </div>
                 </>
@@ -4338,11 +4636,18 @@ function Transactions({ userId, userName }) {
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
+    const time = d.toLocaleTimeString('en-NG', { 
+      hour: '2-digit', minute: '2-digit', second: '2-digit', 
+      hour12: true, timeZone: 'Africa/Lagos' 
+    }) + ' WAT';
     if (d.toDateString() === today.toDateString())
-      return `Today, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+      return `Today, ${time}`;
     if (d.toDateString() === yesterday.toDateString())
-      return `Yesterday, ${d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
-    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' });
+      return `Yesterday, ${time}`;
+    return d.toLocaleDateString('en-NG', { 
+      day: '2-digit', month: 'short', year: 'numeric',
+      timeZone: 'Africa/Lagos'
+    }) + ', ' + time;
   };
 
   const clearFilters = () => {
@@ -4356,7 +4661,7 @@ function Transactions({ userId, userName }) {
 
   // PDF Export
   const downloadPDF = () => {
-    const doc = new window.jspdf.jsPDF();
+    const doc = new jsPDF();
 
     // Header background
     doc.setFillColor(13, 110, 130);
@@ -4409,48 +4714,50 @@ function Transactions({ userId, userName }) {
       t.type === 'credit' ? 'Credit' : 'Debit',
       `${t.type === 'credit' ? '+' : '-'}${fmt(t.amount)}`,
     ]);
-
-    doc.autoTable({
-      startY: 88,
-      head: [['Date', 'Description', 'Type', 'Amount']],
-      body: tableRows,
-      headStyles: {
-        fillColor: [13, 110, 130],
-        textColor: 255,
-        fontStyle: 'bold',
-        fontSize: 9,
-      },
-      bodyStyles: { fontSize: 9, textColor: [30, 41, 59] },
-      alternateRowStyles: { fillColor: [244, 249, 250] },
-      columnStyles: {
-        0: { cellWidth: 32 },
-        1: { cellWidth: 90 },
-        2: { cellWidth: 28 },
-        3: { cellWidth: 32, halign: 'right' },
-      },
-      didParseCell: (data) => {
-        if (data.column.index === 3 && data.section === 'body') {
-          const val = data.cell.text[0] || '';
-          data.cell.styles.textColor = val.startsWith('+') ? [47, 184, 138] : [224, 82, 82];
-          data.cell.styles.fontStyle = 'bold';
-        }
-      },
+    
+    import('jspdf-autotable').then(({ default: autoTable }) => {
+      autoTable(doc, {
+        startY: 88,
+        head: [['Date', 'Description', 'Type', 'Amount']],
+        body: tableRows,
+        headStyles: {
+          fillColor: [13, 110, 130],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 9,
+        },
+        bodyStyles: { fontSize: 9, textColor: [30, 41, 59] },
+        alternateRowStyles: { fillColor: [244, 249, 250] },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 90 },
+          2: { cellWidth: 28 },
+          3: { cellWidth: 32, halign: 'right' },
+        },
+        didParseCell: (data) => {
+          if (data.column.index === 3 && data.section === 'body') {
+            const val = data.cell.text[0] || '';
+            data.cell.styles.textColor = val.startsWith('+') ? [47, 184, 138] : [224, 82, 82];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+      });
+    
+      // Footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Span Healthcare — Confidential | Page ${i} of ${pageCount}`,
+          14,
+          doc.internal.pageSize.height - 8
+        );
+      }
+    
+      doc.save(`SpanHC_Statement_${dateFrom || 'all'}_to_${dateTo || 'today'}.pdf`);
     });
-
-    // Footer
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
-      doc.text(
-        `Span Healthcare — Confidential | Page ${i} of ${pageCount}`,
-        14,
-        doc.internal.pageSize.height - 8
-      );
-    }
-
-    doc.save(`SpanHC_Statement_${dateFrom || 'all'}_to_${dateTo || 'today'}.pdf`);
   };
 
   return (
