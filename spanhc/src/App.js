@@ -347,16 +347,16 @@ const styles = `
     .dashboard-grid { grid-template-columns: 1fr; }
   }
 
-  @media (max-width: 768px) {
-    .auth-screen { grid-template-columns: 1fr; }
-    .auth-left { display: none; }
-    .auth-right { padding: 32px 24px; min-height: 100vh; }
-    .auth-form-container { max-width: 100%; }
+ @media (max-width: 768px) {
+    .auth-screen { grid-template-columns: 1fr !important; }
+    .auth-left { display: none !important; }
+    .auth-right { padding: 32px 24px !important; min-height: 100vh !important; }
+    .auth-form-container { max-width: 100% !important; }
 
-    .sidebar { transform: translateX(-100%); transition: transform 0.3s ease; z-index: 200; }
-    .sidebar.mobile-open { transform: translateX(0); }
+    .sidebar { transform: translateX(-100%) !important; transition: transform 0.3s ease !important; z-index: 200 !important; }
+    .sidebar.mobile-open { transform: translateX(0) !important; }
 
-    .main-content { margin-left: 0; padding: 16px; }
+    .main-content { margin-left: 0 !important; padding: 16px !important; }
 
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .dashboard-grid { grid-template-columns: 1fr; }
