@@ -544,7 +544,7 @@ return;
         .from('doctors')
         .select('id')
         .eq('user_id', result.user.id)
-        .single();
+        .maybeSingle();
       if (doctorCheck) {
         await supabase.auth.signOut();
         setError("This account is registered as a doctor. Please use the Doctor login.");
