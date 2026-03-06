@@ -347,7 +347,7 @@ const styles = `
     .dashboard-grid { grid-template-columns: 1fr; }
   }
 
- @media (max-width: 768px) {
+ @media (max-width: 900px) {
     .auth-screen { grid-template-columns: 1fr !important; }
     .auth-left { display: none !important; }
     .auth-right { padding: 32px 24px !important; min-height: 100vh !important; }
