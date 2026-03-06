@@ -346,6 +346,35 @@ const styles = `
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .dashboard-grid { grid-template-columns: 1fr; }
   }
+
+  @media (max-width: 768px) {
+    .auth-screen { grid-template-columns: 1fr; }
+    .auth-left { display: none; }
+    .auth-right { padding: 32px 24px; min-height: 100vh; }
+    .auth-form-container { max-width: 100%; }
+
+    .sidebar { transform: translateX(-100%); transition: transform 0.3s ease; z-index: 200; }
+    .sidebar.mobile-open { transform: translateX(0); }
+
+    .main-content { margin-left: 0; padding: 16px; }
+
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .form-grid-2 { grid-template-columns: 1fr; }
+    .doctors-grid { grid-template-columns: 1fr; }
+    .dependents-grid { grid-template-columns: 1fr; }
+    .documents-grid { grid-template-columns: repeat(2, 1fr); }
+    .time-slots { grid-template-columns: repeat(3, 1fr); }
+    .quick-actions { grid-template-columns: repeat(2, 1fr); }
+
+    .topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .modal { width: 95%; max-height: 95vh; }
+    .page-title { font-size: 20px; }
+    .wallet-amount { font-size: 28px; }
+    .wallet-actions { flex-wrap: wrap; }
+
+    .mobile-menu-btn { display: flex !important; }
+  }
 `;
 
 function generateSpanID(name) {
@@ -739,7 +768,7 @@ onDoctorLogin(data.user, doctorData);
   );
 }
 
-function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
+function Sidebar({ active, onNav, userPhoto, userName, onLogout, mobileOpen }) {
   const sections = [
     { label: "", items: [{ id: "dashboard", label: "Dashboard", short: "DB" }, { id: "wallet", label: "Wallet", short: "WL" }, { id: "transactions", label: "Transactions", short: "TX" }] },
     { label: "Health", items: [{ id: "telemedicine", label: "Telemedicine", short: "TM" }, { id: "appointments", label: "Appointments", short: "AP" }, { id: "chat", label: "Messages", short: "MSG" }, { id: "documents", label: "Documents", short: "DOC" }] },
@@ -747,7 +776,7 @@ function Sidebar({ active, onNav, userPhoto, userName, onLogout }) {
   ];
   const initials = userName ? userName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() : "EO";
   return (
-    <div className="sidebar">
+    <div className={"sidebar" + (mobileOpen ? " mobile-open" : "")}>
       <div className="sidebar-logo">
         <img
           src="/assets/logo.png"
@@ -4998,6 +5027,7 @@ function Settings() {
 export default function App() {
   const [authed, setAuthed] = useState(false);
   const [page, setPage] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userPhoto] = useState(null);
   const [userName, setUserName] = useState("Loading...");
   const [userId, setUserId] = useState(null);
@@ -5072,8 +5102,22 @@ return (
     <style>{styles}</style>
     <div className="app">
       <div className="main-layout">
-        <Sidebar active={page} onNav={setPage} userPhoto={userPhoto} userName={userName} onLogout={handleLogout} />
-        <div className="main-content">{pages[page] || pages.dashboard}</div>
+      <Sidebar active={page} onNav={(p) => { setPage(p); setSidebarOpen(false); }} userPhoto={userPhoto} userName={userName} onLogout={handleLogout} mobileOpen={sidebarOpen} />
+      <div className="main-content">
+  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #eef2f5' }}>
+    <button
+      onClick={() => setSidebarOpen(!sidebarOpen)}
+      className="mobile-menu-btn"
+      style={{ width: 40, height: 40, borderRadius: 10, border: '1.5px solid #dce8eb', background: 'white', cursor: 'pointer', fontSize: 18, alignItems: 'center', justifyContent: 'center', display: 'none' }}
+    >
+      ☰
+    </button>
+    <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--navy)', fontFamily: "'Montserrat',sans-serif" }}>
+      Span Healthcare
+    </div>
+  </div>
+  {pages[page] || pages.dashboard}
+</div>
       </div>
     </div>
   </>
