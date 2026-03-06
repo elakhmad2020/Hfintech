@@ -36,7 +36,12 @@ const styles = `
 
   .app { display: flex; flex-direction: column; min-height: 100vh; }
 
-  .auth-screen { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 0.9fr; background: var(--white); }
+ .auth-screen { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 0.9fr; background: var(--white); }
+  @media (max-width: 900px) {
+    .auth-screen { grid-template-columns: 1fr !important; }
+    .auth-left { display: none !important; }
+    .auth-right { padding: 32px 24px !important; }
+  }
   .auth-left {
     background: linear-gradient(160deg, var(--navy) 0%, var(--navy-mid) 40%, var(--primary-dark) 100%);
     display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
