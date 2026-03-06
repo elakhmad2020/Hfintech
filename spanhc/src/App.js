@@ -5103,6 +5103,12 @@ return (
     <div className="app">
       <div className="main-layout">
       <Sidebar active={page} onNav={(p) => { setPage(p); setSidebarOpen(false); }} userPhoto={userPhoto} userName={userName} onLogout={handleLogout} mobileOpen={sidebarOpen} />
+      {sidebarOpen && (
+  <div
+    onClick={() => setSidebarOpen(false)}
+    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 199 }}
+  />
+)}
       <div className="main-content">
   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #eef2f5' }}>
     <button
