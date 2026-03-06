@@ -568,7 +568,7 @@ return;
   .from('doctors')
   .select('*')
   .eq('user_id', data.user.id)
-  .single();
+  .maybeSingle();
 if (docError || !doctorData) throw new Error("No doctor profile found for this account");
 if (doctorData.status === 'pending') throw new Error("Your account is pending approval. You will receive an email once approved.");
 if (doctorData.status === 'rejected') throw new Error("Your application was not approved. Please contact support.");
@@ -834,7 +834,7 @@ function Dashboard({ onNav, userName, userId }) {
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
       setWallet(walletData);
 
       const { data: txnData } = await supabase
@@ -1112,7 +1112,7 @@ function WalletPage({ userId }) {
   const fetchWalletData = async () => {
     setLoading(true);
     try {
-      const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
+      const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).maybeSingle();
       setWallet(walletData);
       const { data: txnData } = await supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
       setTransactions(txnData || []);
@@ -1641,7 +1641,7 @@ function SchedulePage({ doctorId }) {
       .from('doctor_availability')
       .insert({ doctor_id: doctorId, ...newSlot, is_active: true })
       .select()
-      .single();
+      .maybeSingle();
     if (error) {
       alert('Error saving slot: ' + error.message);
       console.error('Slot save error:', error);
@@ -1814,7 +1814,7 @@ function ConsultationNotesPage({ doctorId }) {
       .from('consultation_notes')
       .select('*')
       .eq('appointment_id', appt.id)
-      .single();
+      .maybeSingle();
     if (data) {
       setNote({ diagnosis: data.diagnosis || '', notes: data.notes || '', follow_up: data.follow_up || '', prescription: data.prescription || '' });
     } else {
@@ -1829,7 +1829,7 @@ function ConsultationNotesPage({ doctorId }) {
       .from('consultation_notes')
       .select('id')
       .eq('appointment_id', selected.id)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       await supabase.from('consultation_notes').update({
@@ -2321,7 +2321,7 @@ function DoctorMessagesPage({ doctorUserId, doctorName }) {
         file_url,
         file_name,
         file_type,
-      }).select().single();
+      }).select().maybeSingle();
 
       if (!error && data) {
         setMessages(prev => [...prev, {
@@ -2540,7 +2540,7 @@ function DoctorDashboard({ doctorProfile, doctorUser, onLogout }) {
 console.log('doctorProfile received:', doctorProfile);
   useEffect(() => {
     if (!doctorProfile?.id && doctorProfile?.user_id) {
-      supabase.from('doctors').select('*').eq('user_id', doctorProfile.user_id).single().then(({ data }) => {
+      supabase.from('doctors').select('*').eq('user_id', doctorProfile.user_id).maybeSingle().then(({ data }) => {
         if (data) setProfile(data);
       });
     }
@@ -2977,7 +2977,7 @@ function DependentsPage({ userId }) {
         allergies: newDep.allergies || 'None',
       })
       .select()
-      .single();
+      .maybeSingle();
     if (!error) {
       setDependents([...dependents, data]);
       setShowAdd(false);
@@ -3366,7 +3366,7 @@ function MessagesPage({ userId, userName }) {
         file_url,
         file_name,
         file_type,
-      }).select().single();
+      }).select().maybeSingle();
 
       if (!error && data) {
         setMessages(prev => [...prev, {
@@ -3628,7 +3628,7 @@ function TelemedicinePage({ userId, userName }) {
       .from('wallets')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     setWallet(data);
   };
 
@@ -4201,7 +4201,7 @@ function DocumentsPage({ userId }) {
           label: label,
         })
         .select()
-        .single();
+        .maybeSingle();
       if (dbError) throw dbError;
 
       setDocuments([data, ...documents]);
